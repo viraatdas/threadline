@@ -1,0 +1,34 @@
+{
+  "inbox_initial_state": {
+    "users": {
+      "100": { "id_str": "100", "screen_name": "owner", "name": "Owner" },
+      "200": {
+        "id_str": "200",
+        "screen_name": "alice",
+        "name": "Alice Rivera"
+      },
+      "300": { "id_str": "300", "screen_name": "ben", "name": "Ben Cho" },
+      "400": { "id_str": "400", "screen_name": "cass", "name": "Cass Wu" }
+    },
+    "conversations": {
+      "100-200": {
+        "id": "100-200",
+        "type": "ONE_TO_ONE",
+        "participants": {
+          "100": { "user_id": "100" },
+          "200": { "user_id": "200" }
+        }
+      },
+      "group-100-300-400": {
+        "id": "group-100-300-400",
+        "type": "GROUP_DM",
+        "participants": {
+          "100": { "user_id": "100" },
+          "300": { "user_id": "300" },
+          "400": { "user_id": "400" }
+        }
+      }
+    },
+    "entries": []
+  }
+}

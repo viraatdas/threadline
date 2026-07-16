@@ -1,0 +1,52 @@
+{
+  "success": true,
+  "conversations": [
+    {
+      "id": "100-200",
+      "participants": [
+        { "id": "100", "username": "owner", "name": "Owner" },
+        { "id": "200", "username": "alice", "name": "Alice Rivera" }
+      ],
+      "messages": [
+        {
+          "id": "dm-1",
+          "conversationId": "100-200",
+          "text": "Would your team be open to a Threadline pilot?",
+          "createdAt": "2026-07-14T18:00:00.000Z",
+          "senderId": "100",
+          "recipientId": "200"
+        },
+        {
+          "id": "dm-2",
+          "conversationId": "100-200",
+          "text": "Yes, send me a few times next week.",
+          "createdAt": "2026-07-14T19:30:00.000Z",
+          "senderId": "200",
+          "recipientId": "100"
+        }
+      ],
+      "inboxKind": "accepted",
+      "conversationType": "ONE_TO_ONE"
+    },
+    {
+      "id": "group-100-300-400",
+      "participants": [
+        { "id": "100", "username": "owner", "name": "Owner" },
+        { "id": "300", "username": "ben", "name": "Ben Cho" },
+        { "id": "400", "username": "cass", "name": "Cass Wu" }
+      ],
+      "messages": [
+        {
+          "id": "group-1",
+          "conversationId": "group-100-300-400",
+          "text": "Introducing you both.",
+          "createdAt": "2026-07-14T20:00:00.000Z",
+          "senderId": "100"
+        }
+      ],
+      "inboxKind": "accepted",
+      "conversationType": "GROUP_DM"
+    }
+  ],
+  "events": []
+}

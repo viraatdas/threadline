@@ -1,0 +1,15 @@
+{
+  "conversation_timeline": {
+    "entries": [
+      {
+        "message": {
+          "id": "deleted-1",
+          "time": "1784066400000",
+          "conversation_id": "100-200",
+          "sender_id": "200",
+          "recipient_id": "100"
+        }
+      }
+    ]
+  }
+}
