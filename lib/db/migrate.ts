@@ -9,8 +9,12 @@ import { getDatabaseEnvironment } from "@/lib/security/env";
 const { DATABASE_URL } = getDatabaseEnvironment();
 const client = postgres(DATABASE_URL, { max: 1, prepare: false });
 
-try {
-  await migrate(drizzle(client), { migrationsFolder: "migrations" });
-} finally {
-  await client.end();
+async function main() {
+  try {
+    await migrate(drizzle(client), { migrationsFolder: "migrations" });
+  } finally {
+    await client.end();
+  }
 }
+
+void main();
