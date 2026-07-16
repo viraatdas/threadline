@@ -259,8 +259,22 @@ function discoverOwnerAliases(
   const aliases = new Set([normalizeEmailAddress(ownerEmail)]);
   for (const draft of drafts) {
     const labels = new Set(draft.message.labelIds ?? []);
-    if (!labels.has("SENT")) continue;
-    for (const sender of draft.from) aliases.add(sender.address);
+    if (labels.has("SENT")) {
+      for (const sender of draft.from) aliases.add(sender.address);
+    }
+    if (labels.has("INBOX")) {
+      for (const headerName of [
+        "delivered-to",
+        "x-original-to",
+        "envelope-to",
+      ]) {
+        for (const recipient of parseAddressList(
+          headerValue(draft.headers, headerName),
+        )) {
+          aliases.add(recipient.address);
+        }
+      }
+    }
   }
   return aliases;
 }
