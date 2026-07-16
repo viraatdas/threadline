@@ -804,18 +804,23 @@ export class XWebDmTransport implements XDmReadTransport {
     const hasMore = remaining.length > 0;
 
     return {
-      conversations: [
-        {
-          ...definition,
-          participants,
-          messages: ordered,
-          ...(latest?.createdAt ? { lastMessageAt: latest.createdAt } : {}),
-          ...(latest?.text ? { lastMessagePreview: latest.text } : {}),
-          conversationType:
-            definition.conversationType ??
-            (participants.length > 2 ? "GROUP_DM" : "ONE_TO_ONE"),
-        },
-      ],
+      conversations:
+        ordered.length > 0
+          ? [
+              {
+                ...definition,
+                participants,
+                messages: ordered,
+                ...(latest?.createdAt
+                  ? { lastMessageAt: latest.createdAt }
+                  : {}),
+                ...(latest?.text ? { lastMessagePreview: latest.text } : {}),
+                conversationType:
+                  definition.conversationType ??
+                  (participants.length > 2 ? "GROUP_DM" : "ONE_TO_ONE"),
+              },
+            ]
+          : [],
       nextCursor: encodeCursor({
         version: 1,
         transport: "x-web",

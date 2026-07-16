@@ -407,6 +407,7 @@ export class DatabaseXSyncStore implements XSyncStore {
           .from(messages)
           .where(eq(messages.conversationId, conversation.id))
           .orderBy(asc(messages.sentAt));
+        if (allMessages.length === 0) continue;
         for (const [index, message] of allMessages.entries()) {
           if (message.direction !== "outbound") continue;
           const reply = allMessages
