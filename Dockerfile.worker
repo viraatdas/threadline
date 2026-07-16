@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-bookworm-slim
+
+ARG CODEX_VERSION=0.144.4
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates gosu \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack disable \
+  && npm install --global "@openai/codex@${CODEX_VERSION}" pnpm@10.30.3
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY tsconfig.json ./
+COPY lib/domain ./lib/domain
+COPY worker/codex ./worker/codex
+COPY infra/fly/entrypoint.sh ./infra/fly/entrypoint.sh
+
+RUN chmod 0755 /app/infra/fly/entrypoint.sh \
+  && install -d -m 0700 -o node -g node /data/codex \
+  && install -d -m 0555 -o node -g node /var/empty/threadline-codex
+
+ENV NODE_ENV=production \
+    ANALYSIS_RUNNER=codex-cli \
+    CODEX_COMMAND=codex \
+    CODEX_MODEL=gpt-5.6-luna \
+    CODEX_HOME=/data/codex \
+    CODEX_WORKDIR=/var/empty/threadline-codex \
+    CODEX_OUTPUT_SCHEMA_PATH=/app/worker/codex/classification-output.schema.json \
+    WORKER_CONCURRENCY=1 \
+    WORKER_HEALTH_PORT=8080
+
+VOLUME ["/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8080/livez').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+ENTRYPOINT ["/app/infra/fly/entrypoint.sh"]

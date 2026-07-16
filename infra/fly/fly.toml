@@ -1,0 +1,48 @@
+app = "threadline-codex-worker"
+primary_region = "sjc"
+kill_signal = "SIGTERM"
+kill_timeout = "45s"
+
+[build]
+  dockerfile = "Dockerfile.worker"
+
+[env]
+  ANALYSIS_RUNNER = "codex-cli"
+  CODEX_COMMAND = "codex"
+  CODEX_MODEL = "gpt-5.6-luna"
+  CODEX_HOME = "/data/codex"
+  CODEX_WORKDIR = "/var/empty/threadline-codex"
+  CODEX_OUTPUT_SCHEMA_PATH = "/app/worker/codex/classification-output.schema.json"
+  CODEX_TIMEOUT_MS = "120000"
+  WORKER_CONCURRENCY = "1"
+  WORKER_HEALTH_PORT = "8080"
+  WORKER_MAX_ATTEMPTS = "3"
+  WORKER_MAX_INPUT_BYTES = "65536"
+  WORKER_MAX_MESSAGE_BYTES = "6000"
+  WORKER_MAX_MESSAGES = "40"
+  WORKER_POLL_INTERVAL_MS = "2000"
+  WORKER_RETRY_DELAY_MS = "30000"
+  WORKER_STALE_AFTER_MS = "600000"
+
+[[mounts]]
+  source = "threadline_codex_data"
+  destination = "/data"
+  initial_size = "1gb"
+  snapshot_retention = 14
+
+[[restart]]
+  policy = "always"
+
+[checks.worker_liveness]
+  type = "http"
+  port = 8080
+  method = "get"
+  path = "/livez"
+  interval = "15s"
+  timeout = "3s"
+  grace_period = "20s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"
