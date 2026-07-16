@@ -182,6 +182,38 @@ describe("X web DM pagination", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(5);
   });
 
+  it("stops conversation pagination after crossing the requested cutoff", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("inbox_initial_state.json")) {
+        return jsonResponse(fixture("x-inbox-initial.json"));
+      }
+      if (url.pathname.includes("100-200")) {
+        if (url.searchParams.has("max_id")) {
+          throw new Error("The cutoff should prevent an older page request.");
+        }
+        return jsonResponse(fixture("x-conversation-page-1.json"));
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as typeof fetch;
+    const transport = new XWebDmTransport({
+      credentials: { authToken: "auth", ct0: "ct0" },
+      owner,
+      endpoints,
+      fetchImpl,
+    });
+
+    const page = await transport.fetchPage({
+      limit: 5,
+      since: new Date("2026-07-14T20:15:00.000Z"),
+    });
+
+    expect(
+      page.conversations[0]?.messages.map((message) => message.id),
+    ).toEqual(["web-3"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps deleted or unavailable message events without inventing body text", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));

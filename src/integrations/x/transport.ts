@@ -694,9 +694,11 @@ export class XWebDmTransport implements XDmReadTransport {
     conversationId: string,
     signal: AbortSignal | undefined,
     limit: number,
+    since?: Date,
   ) {
     const events = new Map<string, BirdDmEvent>();
     const users = new Map<string, BirdDmUser>();
+    const cutoff = since?.getTime();
     let maxId: string | undefined;
 
     for (let page = 0; page < MAX_CONVERSATION_PAGES; page += 1) {
@@ -712,10 +714,17 @@ export class XWebDmTransport implements XDmReadTransport {
       const timeline = parseConversationTimeline(payload, conversationId);
       for (const event of timeline.events) events.set(event.id, event);
       for (const user of timeline.users.values()) users.set(user.id, user);
+      const crossedCutoff =
+        cutoff !== undefined &&
+        timeline.events.some((event) => {
+          const timestamp = eventTimestamp(event.createdAt);
+          return timestamp > 0 && timestamp < cutoff;
+        });
       if (
         !timeline.nextMaxId ||
         timeline.events.length === 0 ||
-        timeline.nextMaxId === maxId
+        timeline.nextMaxId === maxId ||
+        crossedCutoff
       ) {
         return { events: [...events.values()], users };
       }
@@ -764,6 +773,7 @@ export class XWebDmTransport implements XDmReadTransport {
       conversationId,
       request.signal,
       Math.min(Math.max(request.limit ?? DEFAULT_PAGE_SIZE, 1), 100),
+      request.since,
     );
     const users = new Map(inbox.users);
     for (const user of history.users.values()) users.set(user.id, user);
@@ -783,7 +793,7 @@ export class XWebDmTransport implements XDmReadTransport {
       ? events.filter(
           (event) =>
             !event.createdAt ||
-            new Date(event.createdAt).getTime() >= request.since!.getTime(),
+            eventTimestamp(event.createdAt) >= request.since!.getTime(),
         )
       : events;
     const ordered = [...messages].sort(
