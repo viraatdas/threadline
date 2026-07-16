@@ -7,6 +7,9 @@ import { getDatabase } from "@/lib/db";
 import { XIntegrationError } from "@/src/integrations/x/errors";
 import { runDatabaseXSync } from "@/src/integrations/x/database";
 
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
 const requestSchema = z.object({
   integrationAccountId: z.string().uuid().optional(),
   limit: z.number().int().min(1).max(100).optional(),
