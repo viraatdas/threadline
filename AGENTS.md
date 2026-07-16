@@ -14,3 +14,5 @@
 ## Execute: Dead-ends tried
 
 - Fly.io worker app creation cannot proceed while the Fly organization has an overdue invoice; retries return the same billing restriction, so deployment requires the account balance to be cleared first.
+- Vercel source deployments stalled at the deployment-creation request on 2026-07-16; `vercel pull --environment=production`, `vercel build --prod`, then `vercel deploy --prebuilt --prod --archive=tgz` produced the READY deployment.
+- GitHub's Actions REST endpoint returned HTTP 503 on three consecutive post-push checks on 2026-07-16; stop polling and use the already-passed local `pnpm check` evidence until the API recovers.
