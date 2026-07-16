@@ -77,3 +77,8 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
   - Provision and deploy the Fly worker [out of lane] — The deployment lane must create the Fly app/volume, set DATABASE_URL, upload the owner’s existing ChatGPT Codex auth.json directly to the volume, scale to exactly one Machine, and confirm /readyz with real credentials.
 - **By:** n1 · 2026-07-16T01:31:03.381Z
 
+## followup: Completed the Gmail recovery implementation within n2-owned paths: preserved
+- **Did:** Completed the Gmail recovery implementation within n2-owned paths: preserved the existing read-only OAuth/backfill/history ingestion, added delivery-header alias recognition for inbound mail, and made persisted touchpoints update reply state when later Gmail replies arrive. Synthetic Gmail fixtures, scoped formatting/lint/typecheck, shared typecheck, production build, and a Gmail mutation-method audit all pass.
+- **Interfaces:** src/integrations/gmail/normalize.ts owner alias discovery; src/integrations/gmail/store.ts idempotent touchpoint reply-state updates; tests/gmail/normalization.test.ts synthetic inbound-alias fixture coverage; existing owner-only Gmail connect/callback/disconnect/status/sync APIs remain unchanged
+- **By:** followup · 2026-07-16T07:07:47.303Z
+
