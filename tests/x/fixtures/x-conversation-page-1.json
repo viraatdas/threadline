@@ -1,0 +1,31 @@
+{
+  "conversation_timeline": {
+    "entries": [
+      {
+        "message": {
+          "id": "web-3",
+          "time": "1784061000000",
+          "conversation_id": "100-200",
+          "message_data": {
+            "text": "Happy to. Tuesday works.",
+            "sender_id": "200",
+            "recipient_id": "100"
+          }
+        }
+      },
+      {
+        "message": {
+          "id": "web-2",
+          "time": "1784059200000",
+          "conversation_id": "100-200",
+          "message_data": {
+            "text": "Could we talk next week?",
+            "sender_id": "100",
+            "recipient_id": "200"
+          }
+        }
+      }
+    ],
+    "min_entry_id": "web-2"
+  }
+}

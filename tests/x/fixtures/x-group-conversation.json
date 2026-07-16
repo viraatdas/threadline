@@ -1,0 +1,25 @@
+{
+  "conversation_timeline": {
+    "entries": [
+      {
+        "message": {
+          "id": "group-web-1",
+          "time": "1784062800000",
+          "conversation_id": "group-100-300-400",
+          "message_data": { "text": "Ben, meet Cass.", "sender_id": "100" }
+        }
+      },
+      {
+        "message": {
+          "id": "group-web-2",
+          "time": "1784064600000",
+          "conversation_id": "group-100-300-400",
+          "message_data": {
+            "text": "Great to meet you both.",
+            "sender_id": "400"
+          }
+        }
+      }
+    ]
+  }
+}

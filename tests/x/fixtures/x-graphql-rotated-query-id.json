@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "message": "PersistedQueryNotFound",
+      "extensions": {
+        "code": "PERSISTED_QUERY_NOT_FOUND",
+        "operationName": "DmInboxTimeline"
+      }
+    }
+  ]
+}
