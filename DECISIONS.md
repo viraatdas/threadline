@@ -102,3 +102,13 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
   - Resume worker and real-account smoke — After Fly billing is cleared, create the app/volume, inject DATABASE_URL, upload file-backed Codex auth, deploy one machine, then complete Arc-authorized Google OAuth, Linked API, X cookie, restart persistence, and real read-only sync verification.
 - **By:** worker · 2026-07-16T20:35:54.336Z
 
+## worker: Pushed and deployed the fully hardened Threadline main; provisioned
+- **Did:** Pushed and deployed the fully hardened Threadline main; provisioned Supabase and migrations; configured Vercel provider secrets and daily secured cron; attached threadline.viraat.dev through Netlify DNS; installed encrypted read-only X credentials; fixed Vercel/X serverless transport, endpoint health, cutoff pagination, numeric timestamp filtering, empty-page side effects, route duration, and incremental scheduled sync; verified owner routes, HTTPS, cron authorization, X health, real 30-page read-only sync, zero stale runs/jobs, no mutation call signatures, and no tracked secrets. Fly worker provisioning remains blocked by the owner's overdue Fly invoice, while Google Cloud reauthentication and Linked API account linking require user interaction.
+- **Interfaces:** main efef00fbeca3a7bc5273cd7ad956de4e457ef9bf; production https://threadline.viraat.dev; Vercel project prj_ldidUzvEwtUJz0UUL1wGpSmhIPOm and deployment dpl_WfC9h167oZtu9fYQjibXXBaunKKK; Supabase dcfogxsbikywtemppwdo; Netlify DNS record 6a5940176edc313597bbdc2b; daily Vercel cron /api/cron/sync at 15:00 UTC; X integration health/sync APIs and serverless web transport; Fly worker config uses persistent CODEX_HOME and gpt-5.6-luna
+- **Follow-ups:**
+  - Clear Fly billing hold [out of lane] — Fly refuses app creation because the personal account has overdue invoices; the private persistent worker cannot be created until billing is updated.
+  - Finish Google OAuth setup [out of lane] — Google Cloud requires password reauthentication in the owner's Arc session before the two production callback URIs can be registered and real Gmail/owner login verified.
+  - Link Linked API account [out of lane] — No Linked API account credentials are available; the owner must complete account linking before real LinkedIn read-only sync can run.
+  - Complete worker and cross-provider smoke [out of lane] — After the external blockers are cleared, deploy exactly one Fly worker, upload file-backed Codex auth, verify restart persistence and one Luna classification, then run real Gmail and LinkedIn read-only syncs.
+- **By:** worker · 2026-07-16T21:36:51.553Z
+
