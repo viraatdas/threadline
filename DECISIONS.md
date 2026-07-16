@@ -94,3 +94,11 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
 - **What:** The referenced `tmvwsssmurlk` hardening change was an empty sibling, so the terminal hardening pass was completed directly on `main`: real navigation targets, owner-only source settings, aggregate integration tests, authenticated Playwright release coverage, production deployment/security documentation, and the LinkedIn sync status correction.
 - **Why:** Preserve the already-merged Gmail recovery and unified-sync ancestry while ensuring every intended hardening behavior exists in the pushed production candidate without manufacturing an empty merge.
 - **By:** main release · 2026-07-16
+## worker: Pushed verified Threadline main at 5af469f597e2ff9583e85f381dfab739744394c7; pr…
+- **Did:** Pushed verified Threadline main at 5af469f597e2ff9583e85f381dfab739744394c7; provisioned Supabase project dcfogxsbikywtemppwdo and applied migrations; configured encrypted Vercel production environment; deployed Vercel production dpl_CcWxNdSGzqy9XPcfA3m8xf3rvTQi; attached threadline.viraat.dev; created Netlify CNAME record 6a5940176edc313597bbdc2b; verified DNS, HTTPS, owner-auth redirects, and unauthenticated sync rejection. Fly worker provisioning stopped at an explicit overdue-invoice billing blocker before app creation.
+- **Interfaces:** main commit 5af469f597e2ff9583e85f381dfab739744394c7; Supabase project dcfogxsbikywtemppwdo; Vercel project prj_ldidUzvEwtUJz0UUL1wGpSmhIPOm; Vercel deployment dpl_CcWxNdSGzqy9XPcfA3m8xf3rvTQi; production https://threadline.viraat.dev; Netlify DNS record 6a5940176edc313597bbdc2b; migration entrypoint lib/db/migrate.ts
+- **Follow-ups:**
+  - Clear Fly billing hold [out of lane] — Fly rejected app creation because the personal account has overdue invoices; exactly one persistent private worker cannot be deployed until billing is updated.
+  - Resume worker and real-account smoke — After Fly billing is cleared, create the app/volume, inject DATABASE_URL, upload file-backed Codex auth, deploy one machine, then complete Arc-authorized Google OAuth, Linked API, X cookie, restart persistence, and real read-only sync verification.
+- **By:** worker · 2026-07-16T20:35:54.336Z
+

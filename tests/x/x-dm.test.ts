@@ -14,6 +14,7 @@ import {
 } from "@/src/integrations/x/sync";
 import {
   BirdCliDmTransport,
+  BirdWithWebFallbackTransport,
   parseBirdDmsResponse,
   XWebDmTransport,
 } from "@/src/integrations/x/transport";
@@ -96,6 +97,47 @@ describe("Bird-compatible X DM normalization", () => {
 });
 
 describe("X web DM pagination", () => {
+  it("bypasses the Bird CLI in serverless-compatible mode", async () => {
+    const birdRunner = vi.fn(async () => {
+      throw new Error("Bird must not run in serverless mode.");
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/account")) {
+        return jsonResponse({ screen_name: owner.username, id_str: owner.id });
+      }
+      if (url.pathname.endsWith("inbox_initial_state.json")) {
+        return jsonResponse({
+          inbox_initial_state: {
+            users: {},
+            conversations: {},
+            entries: [],
+          },
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as typeof fetch;
+    const transport = new BirdWithWebFallbackTransport({
+      credentials: { authToken: "auth", ct0: "ct0" },
+      owner,
+      endpoints,
+      fetchImpl,
+      birdRunner,
+      preferWeb: true,
+    });
+
+    await expect(transport.checkConnection()).resolves.toMatchObject({
+      ok: true,
+      accountLabel: "@owner",
+    });
+    await expect(transport.fetchPage({})).resolves.toMatchObject({
+      source: "x-web",
+      conversations: [],
+      hasMore: false,
+    });
+    expect(birdRunner).not.toHaveBeenCalled();
+  });
+
   it("collects paginated history, deduplicates boundaries, and preserves group DMs", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));

@@ -815,6 +815,7 @@ export class BirdWithWebFallbackTransport implements XDmReadTransport {
   readonly name = "bird-with-web-fallback" as const;
   private readonly bird: BirdCliDmTransport;
   private readonly web: XWebDmTransport;
+  private readonly preferWeb: boolean;
 
   constructor(options: {
     credentials: XCredentials;
@@ -823,6 +824,7 @@ export class BirdWithWebFallbackTransport implements XDmReadTransport {
     fetchImpl?: typeof fetch;
     birdCommand?: string;
     birdRunner?: BirdCommandRunner;
+    preferWeb?: boolean;
   }) {
     this.bird = new BirdCliDmTransport({
       credentials: options.credentials,
@@ -835,11 +837,16 @@ export class BirdWithWebFallbackTransport implements XDmReadTransport {
       ...(options.endpoints ? { endpoints: options.endpoints } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
+    const isServerlessRuntime =
+      process.env.VERCEL === "1" ||
+      Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+    this.preferWeb = options.preferWeb ?? isServerlessRuntime;
   }
 
   async checkConnection(
     signal?: AbortSignal,
   ): Promise<ConnectorHealth & { account?: XAccountIdentity }> {
+    if (this.preferWeb) return this.web.checkConnection(signal);
     const birdHealth = await this.bird.checkConnection(signal);
     if (birdHealth.ok) return birdHealth;
     if (
@@ -853,7 +860,7 @@ export class BirdWithWebFallbackTransport implements XDmReadTransport {
 
   async fetchPage(request: XDmTransportRequest): Promise<XDmTransportPage> {
     const cursor = decodeXSyncCursor(request.cursor);
-    if (cursor?.transport === "x-web" && !cursor.complete) {
+    if (this.preferWeb || (cursor?.transport === "x-web" && !cursor.complete)) {
       return this.web.fetchPage(request);
     }
     try {
