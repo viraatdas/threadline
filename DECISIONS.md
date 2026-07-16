@@ -7,6 +7,11 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
 - **Why:** user-approved plan; workers implement these nodes in isolated workspaces, honoring the dependency edges
 - **By:** conductor · 1784161569264
 
+## Foundation architecture
+- 2026-07-15: Analysis execution is modeled as a local/subscription-backed runner extension (default `codex-cli`), not a hosted LLM API dependency. This follows the owner's direction to use a personal subscription inside the Fly machine.
+- 2026-07-15: X ingestion uses the currently installable `@jtsang/bird` package and is constrained to read-only operations by Threadline's integration capabilities.
+- 2026-07-15: Auth uses Auth.js v5 with Google OAuth and an explicit `OWNER_EMAIL` allowlist; application sessions are JWT-backed so no extra auth tables are required.
+
 ## n0: Established the complete Threadline shared foundation: pinned Next.js 16/React
 - **Did:** Established the complete Threadline shared foundation: pinned Next.js 16/React 19/pnpm dependency graph, product and design contracts, owner-only Auth.js shell, strict domain/Zod contracts, Drizzle Postgres schema with generated migration, encrypted credentials, read-only safety guards, idempotent repositories, and Vitest/Playwright tooling. Verified frozen-lockfile install, Drizzle migration consistency, design detector, production auth redirect/sign-in smoke test, lint, typecheck, tests, and build.
 - **Interfaces:** package.json and pnpm-lock.yaml; ChannelConnector/AnalysisRunner/CredentialVault in lib/domain/contracts.ts; Zod ingestion and analysis schemas in lib/domain/schemas.ts; Drizzle tables/types in lib/db/schema.ts; createRepositories and per-area repositories in lib/db/repositories/**; auth/requireOwner in lib/auth/**; sealCredential/openCredential, read-only guards, and idempotency helpers in lib/security/**; AppShell and shell primitives in components/shell/**; initial migration migrations/0000_even_quicksilver.sql
@@ -15,4 +20,8 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
   - Provision production services and deploy [out of lane] — The deployment lane must configure Postgres, Google OAuth, encryption/auth secrets, apply migrations, and attach threadline.viraat.dev.
   - Implement subscription-backed analysis runner [out of lane] — The AnalysisRunner contract and codex-cli job fields exist, but Fly-hosted personal-login execution belongs to the analysis/runtime lane.
 - **By:** n0 · 2026-07-16T00:48:30.843Z
+## n0: Resolved the jj merge conflicts in .gitignore and DECISIONS.md,
+- **Did:** Resolved the jj merge conflicts in .gitignore and DECISIONS.md, preserving both Rudder orchestration context and the complete Threadline foundation decisions. Added Rudder-generated directory exclusions to ESLint and TypeScript so validation remains stable in the main integrated workspace. Fresh frozen-lockfile install plus lint, typecheck, tests, and build all pass.
+- **Interfaces:** .gitignore Rudder/tooling exclusions; DECISIONS.md combined plan, architecture, and n0 foundation report; eslint.config.mjs and tsconfig.json exclude .rudder and .rudder-worktrees generated artifacts
+- **By:** n0 · 2026-07-16T00:57:51.425Z
 
