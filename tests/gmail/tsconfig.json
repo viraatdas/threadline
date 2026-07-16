@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "../../next-env.d.ts",
+    "../../lib/**/*.ts",
+    "../../src/integrations/gmail/**/*.ts",
+    "../../app/api/integrations/gmail/**/*.ts",
+    "./**/*.ts"
+  ],
+  "exclude": ["../../node_modules", "../../.rudder", "../../.rudder-worktrees"]
+}

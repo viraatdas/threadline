@@ -1,0 +1,266 @@
+{
+  "profile": {
+    "emailAddress": "owner@example.com",
+    "historyId": "100",
+    "messagesTotal": 3,
+    "threadsTotal": 2
+  },
+  "threadPages": [
+    {
+      "threadIds": ["thread-outreach"],
+      "nextPageToken": "threads-page-2",
+      "resultSizeEstimate": 2
+    },
+    {
+      "pageToken": "threads-page-2",
+      "threadIds": ["thread-missing-body"],
+      "resultSizeEstimate": 2
+    }
+  ],
+  "initialThreads": {
+    "thread-outreach": {
+      "id": "thread-outreach",
+      "historyId": "90",
+      "messages": [
+        {
+          "id": "message-outbound",
+          "threadId": "thread-outreach",
+          "labelIds": ["SENT"],
+          "snippet": "Hi Ada, would you be open to a quick call?",
+          "historyId": "80",
+          "internalDate": "1784062800000",
+          "sizeEstimate": 1200,
+          "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [
+              {
+                "name": "From",
+                "value": "=?UTF-8?Q?Viraat?= <sales@example.com>"
+              },
+              {
+                "name": "To",
+                "value": "\"Ada Lovelace\" <ada@analytical.example>"
+              },
+              { "name": "Subject", "value": "Customer introduction" },
+              { "name": "Message-ID", "value": "<outbound@example.com>" },
+              { "name": "Date", "value": "Tue, 14 Jul 2026 10:00:00 -0700" }
+            ],
+            "parts": [
+              {
+                "partId": "0",
+                "mimeType": "text/plain",
+                "body": {
+                  "data": "SGkgQWRhLAoKV291bGQgeW91IGJlIG9wZW4gdG8gYSBxdWljayBjYWxsPwoKT24gVHVlLCBTb21lb25lIHdyb3RlOgo-IG9sZCBxdW90ZWQgdGV4dA",
+                  "size": 87
+                }
+              },
+              {
+                "partId": "1",
+                "mimeType": "application/pdf",
+                "filename": "brief.pdf",
+                "body": {
+                  "attachmentId": "attachment-brief",
+                  "size": 4096
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "message-reply",
+          "threadId": "thread-outreach",
+          "labelIds": ["INBOX"],
+          "snippet": "Yes, Thursday works.",
+          "historyId": "90",
+          "internalDate": "1784149200000",
+          "sizeEstimate": 900,
+          "payload": {
+            "mimeType": "text/html",
+            "headers": [
+              {
+                "name": "From",
+                "value": "Ada Lovelace <ada@analytical.example>"
+              },
+              { "name": "To", "value": "Viraat <sales@example.com>" },
+              { "name": "Subject", "value": "Re: Customer introduction" },
+              { "name": "Message-ID", "value": "<reply@example.com>" },
+              { "name": "In-Reply-To", "value": "<outbound@example.com>" },
+              { "name": "References", "value": "<outbound@example.com>" },
+              { "name": "Date", "value": "Wed, 15 Jul 2026 10:00:00 -0700" }
+            ],
+            "body": {
+              "data": "PGRpdj5ZZXMsIFRodXJzZGF5IHdvcmtzLjwvZGl2PjxkaXYgY2xhc3M9ImdtYWlsX3F1b3RlIj5PbiBUdWUsIE93bmVyIHdyb3RlOjxibG9ja3F1b3RlPkhpIEFkYTwvYmxvY2txdW90ZT48L2Rpdj4",
+              "size": 112
+            }
+          }
+        }
+      ]
+    },
+    "thread-missing-body": {
+      "id": "thread-missing-body",
+      "historyId": "95",
+      "messages": [
+        {
+          "id": "message-missing-body",
+          "threadId": "thread-missing-body",
+          "labelIds": ["SENT"],
+          "snippet": "Following up from the conference",
+          "historyId": "95",
+          "internalDate": "1784152800000",
+          "payload": {
+            "mimeType": "multipart/alternative",
+            "headers": [
+              { "name": "From", "value": "Owner <owner@example.com>" },
+              {
+                "name": "To",
+                "value": "Grace Hopper <grace@compiler.example>"
+              },
+              { "name": "Subject", "value": "Conference follow-up" },
+              { "name": "Message-ID", "value": "<missing@example.com>" }
+            ],
+            "parts": []
+          }
+        }
+      ]
+    }
+  },
+  "incrementalThreads": {
+    "thread-outreach": {
+      "id": "thread-outreach",
+      "historyId": "120",
+      "messages": [
+        {
+          "id": "message-outbound",
+          "threadId": "thread-outreach",
+          "labelIds": ["SENT"],
+          "snippet": "Hi Ada, would you be open to a quick call?",
+          "historyId": "80",
+          "internalDate": "1784062800000",
+          "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+              { "name": "From", "value": "Viraat <sales@example.com>" },
+              {
+                "name": "To",
+                "value": "Ada Lovelace <ada@analytical.example>"
+              },
+              { "name": "Subject", "value": "Customer introduction" },
+              { "name": "Message-ID", "value": "<outbound@example.com>" }
+            ],
+            "body": {
+              "data": "SGkgQWRhLAoKV291bGQgeW91IGJlIG9wZW4gdG8gYSBxdWljayBjYWxsPwoKT24gVHVlLCBTb21lb25lIHdyb3RlOgo-IG9sZCBxdW90ZWQgdGV4dA",
+              "size": 87
+            }
+          }
+        },
+        {
+          "id": "message-reply",
+          "threadId": "thread-outreach",
+          "labelIds": ["INBOX"],
+          "snippet": "Yes, Thursday works.",
+          "historyId": "90",
+          "internalDate": "1784149200000",
+          "payload": {
+            "mimeType": "text/html",
+            "headers": [
+              {
+                "name": "From",
+                "value": "Ada Lovelace <ada@analytical.example>"
+              },
+              { "name": "To", "value": "Viraat <sales@example.com>" },
+              { "name": "Subject", "value": "Re: Customer introduction" },
+              { "name": "Message-ID", "value": "<reply@example.com>" },
+              { "name": "In-Reply-To", "value": "<outbound@example.com>" }
+            ],
+            "body": {
+              "data": "PGRpdj5ZZXMsIFRodXJzZGF5IHdvcmtzLjwvZGl2PjxkaXYgY2xhc3M9ImdtYWlsX3F1b3RlIj5PbiBUdWUsIE93bmVyIHdyb3RlOjxibG9ja3F1b3RlPkhpIEFkYTwvYmxvY2txdW90ZT48L2Rpdj4",
+              "size": 112
+            }
+          }
+        },
+        {
+          "id": "message-followup",
+          "threadId": "thread-outreach",
+          "labelIds": ["SENT"],
+          "snippet": "Thanks Ada — Thursday at 2pm works.",
+          "historyId": "120",
+          "internalDate": "1784156400000",
+          "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+              { "name": "From", "value": "Viraat <sales@example.com>" },
+              {
+                "name": "To",
+                "value": "Ada Lovelace <ada@analytical.example>"
+              },
+              { "name": "Subject", "value": "Re: Customer introduction" },
+              { "name": "Message-ID", "value": "<followup@example.com>" },
+              { "name": "In-Reply-To", "value": "<reply@example.com>" }
+            ],
+            "body": {
+              "data": "VGhhbmtzIEFkYSDigJQgVGh1cnNkYXkgYXQgMnBtIHdvcmtzLg",
+              "size": 39
+            }
+          }
+        }
+      ]
+    }
+  },
+  "historyPages": {
+    "100": [
+      {
+        "historyId": "110",
+        "nextPageToken": "history-page-2",
+        "history": [
+          {
+            "id": "105",
+            "messages": [
+              { "id": "message-followup", "threadId": "thread-outreach" }
+            ],
+            "messagesAdded": [
+              {
+                "message": {
+                  "id": "message-followup",
+                  "threadId": "thread-outreach"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pageToken": "history-page-2",
+        "historyId": "120",
+        "history": [
+          {
+            "id": "120",
+            "labelsAdded": [
+              {
+                "message": {
+                  "id": "message-followup",
+                  "threadId": "thread-outreach"
+                },
+                "labelIds": ["SENT"]
+              }
+            ],
+            "labelsRemoved": [
+              {
+                "message": {
+                  "id": "message-followup",
+                  "threadId": "thread-outreach"
+                },
+                "labelIds": ["UNREAD"]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "120": [
+      {
+        "historyId": "120",
+        "history": []
+      }
+    ]
+  }
+}
