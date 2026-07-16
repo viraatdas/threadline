@@ -616,6 +616,16 @@ export class XWebDmTransport implements XDmReadTransport {
 
   async checkConnection(signal?: AbortSignal) {
     try {
+      if (this.owner) {
+        await this.getInbox(signal);
+        return {
+          ok: true,
+          checkedAt: new Date(),
+          accountLabel: `@${this.owner.username}`,
+          detail: "Cookie-authenticated X DM reads are healthy.",
+          account: this.owner,
+        };
+      }
       const payload = objectValue(
         await this.getJson(this.endpoints.accountSettingsUrl, {}, signal),
       );
@@ -624,12 +634,10 @@ export class XWebDmTransport implements XDmReadTransport {
         stringValue(payload?.user_id) ??
         stringValue(payload?.user_id_str) ??
         stringValue(nestedUser?.id_str) ??
-        stringValue(nestedUser?.id) ??
-        this.owner?.id;
+        stringValue(nestedUser?.id);
       const username =
         stringValue(payload?.screen_name) ??
-        stringValue(nestedUser?.screen_name) ??
-        this.owner?.username;
+        stringValue(nestedUser?.screen_name);
       if (!id || !username) {
         throw new XIntegrationError(
           "X_INVALID_RESPONSE",

@@ -103,9 +103,6 @@ describe("X web DM pagination", () => {
     });
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      if (url.pathname.endsWith("/account")) {
-        return jsonResponse({ screen_name: owner.username, id_str: owner.id });
-      }
       if (url.pathname.endsWith("inbox_initial_state.json")) {
         return jsonResponse({
           inbox_initial_state: {
@@ -136,6 +133,7 @@ describe("X web DM pagination", () => {
       hasMore: false,
     });
     expect(birdRunner).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("collects paginated history, deduplicates boundaries, and preserves group DMs", async () => {
