@@ -32,13 +32,21 @@ import type {
   ResolvedField,
 } from "@/components/people/types";
 import { UndoNotice } from "@/components/people/undo-notice";
+import type {
+  CompanyCorrectionField,
+  CorrectCompanyAction,
+  EditCompanyAction,
+} from "@/components/workspace-actions";
+import { workspaceActionError } from "@/components/workspace-actions";
 
-type CompanyField = "industry" | "sizeRange" | "location";
+type CompanyField = CompanyCorrectionField;
 
 interface CompanyDetailProps {
   initialCompany: CompanyRecord;
   people: PersonRecord[];
   now: string;
+  editCompanyAction?: EditCompanyAction;
+  correctCompanyAction?: CorrectCompanyAction;
 }
 
 function CompanyFieldRow({
@@ -85,26 +93,32 @@ export function CompanyDetail({
   initialCompany,
   people,
   now,
+  editCompanyAction,
+  correctCompanyAction,
 }: CompanyDetailProps) {
   const [company, setCompany] = useState(initialCompany);
   const [editing, setEditing] = useState(false);
   const [correcting, setCorrecting] = useState<CompanyField | null>(null);
   const [undo, setUndo] = useState<CompanyRecord | null>(null);
   const [undoMessage, setUndoMessage] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function checkpoint(message: string) {
     setUndo(company);
     setUndoMessage(message);
   }
 
-  function handleEdit(formData: FormData) {
+  async function handleEdit(formData: FormData) {
+    const snapshot = company;
     const name = String(formData.get("name") ?? company.name).trim();
     const domain = String(formData.get("domain") ?? "").trim();
     const description = String(formData.get("description") ?? "").trim();
     const occurredAt = new Date().toISOString();
-    checkpoint("Company edits saved.");
-    setCompany((current) => ({
-      ...current,
+    if (!editCompanyAction) checkpoint("Company edits saved.");
+    else setUndo(null);
+    setActionError(null);
+    const nextCompany: CompanyRecord = {
+      ...company,
       name,
       domain: domain || null,
       description: description || null,
@@ -118,35 +132,69 @@ export function CompanyDetail({
           detail: "Updated owner-managed company fields.",
           outcome: "success",
         },
-        ...current.audit,
+        ...company.audit,
       ],
-    }));
+    };
+    setCompany(nextCompany);
     setEditing(false);
+
+    if (!editCompanyAction) return;
+    try {
+      const result = await editCompanyAction(company.id, formData);
+      const error = workspaceActionError(
+        result,
+        "The company changes could not be saved.",
+      );
+      if (error) {
+        setCompany(snapshot);
+        setActionError(error);
+      } else if (result.ok) {
+        setCompany((current) => ({
+          ...current,
+          audit: current.audit.map((entry, index) =>
+            index === 0
+              ? {
+                  ...entry,
+                  actor: result.data.actorEmail,
+                  occurredAt: result.data.occurredAt,
+                }
+              : entry,
+          ),
+        }));
+      }
+    } catch {
+      setCompany(snapshot);
+      setActionError("The company changes could not be saved. Check your connection and try again.");
+    }
   }
 
-  function handleCorrection(formData: FormData) {
+  async function handleCorrection(formData: FormData) {
     if (!correcting) return;
+    const correctedField = correcting;
+    const snapshot = company;
     const value = String(formData.get("value") ?? "").trim();
     const reason = String(formData.get("reason") ?? "").trim();
     if (!value) return;
     const occurredAt = new Date().toISOString();
-    checkpoint("Company correction saved.");
-    setCompany((current) => ({
-      ...current,
-      [correcting]: {
-        ...current[correcting],
+    if (!correctCompanyAction) checkpoint("Company correction saved.");
+    else setUndo(null);
+    setActionError(null);
+    const nextCompany: CompanyRecord = {
+      ...company,
+      [correctedField]: {
+        ...company[correctedField],
         value,
         kind: "override",
         confidence: 1,
         overrides: [
           {
-            field: correcting,
+            field: correctedField,
             value,
             ...(reason ? { reason } : {}),
             overriddenAt: occurredAt,
             overriddenBy: "owner@threadline.local",
           },
-          ...current[correcting].overrides,
+          ...company[correctedField].overrides,
         ],
       },
       hasManualOverride: true,
@@ -155,18 +203,60 @@ export function CompanyDetail({
           id: `company-correction-${Date.now()}`,
           occurredAt,
           actor: "owner@threadline.local",
-          action: `Corrected ${correcting}`,
-          detail: reason || `Set ${correcting} to ${value}.`,
+          action: `Corrected ${correctedField}`,
+          detail: reason || `Set ${correctedField} to ${value}.`,
           outcome: "success",
         },
-        ...current.audit,
+        ...company.audit,
       ],
-    }));
+    };
+    setCompany(nextCompany);
     setCorrecting(null);
+
+    if (!correctCompanyAction) return;
+    try {
+      const result = await correctCompanyAction(
+        company.id,
+        correctedField,
+        formData,
+      );
+      const error = workspaceActionError(
+        result,
+        "The company correction could not be saved.",
+      );
+      if (error) {
+        setCompany(snapshot);
+        setActionError(error);
+      } else if (result.ok) {
+        setCompany((current) => ({
+          ...current,
+          audit: current.audit.map((entry, index) =>
+            index === 0
+              ? {
+                  ...entry,
+                  actor: result.data.actorEmail,
+                  occurredAt: result.data.occurredAt,
+                }
+              : entry,
+          ),
+        }));
+      }
+    } catch {
+      setCompany(snapshot);
+      setActionError("The company correction could not be saved. Check your connection and try again.");
+    }
   }
 
   return (
     <div className="space-y-8">
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] text-danger"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <div className="border-b border-line pb-7">
         <Link
           href="/people?view=companies"

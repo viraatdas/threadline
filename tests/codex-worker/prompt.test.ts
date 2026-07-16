@@ -6,6 +6,7 @@ import injectionContext from "./fixtures/prompt-injection-thread.json";
 import { WorkerError } from "../../worker/codex/errors";
 import {
   buildClassificationPrompt,
+  buildDraftOutreachPrompt,
   UNTRUSTED_DATA_END,
   UNTRUSTED_DATA_START,
 } from "../../worker/codex/prompt";
@@ -33,6 +34,26 @@ describe("hostile content prompt boundary", () => {
     expect(injection).toBeGreaterThan(outerStart);
     expect(injection).toBeLessThan(outerEnd);
     expect(Buffer.byteLength(prompt)).toBeLessThanOrEqual(65_536);
+  });
+
+  it("requests copy-only draft text while keeping hostile history untrusted", () => {
+    const prompt = buildDraftOutreachPrompt(
+      {
+        jobType: "draft_outreach",
+        entity: { type: "outreach_plan", id: "77777777-7777-4777-8777-777777777777" },
+        payload: { objective: "Schedule a short follow-up." },
+      },
+      injectionContext as AnalysisContext,
+      { maxInputBytes: 65_536, maxMessages: 40, maxMessageBytes: 6_000 },
+    );
+
+    const outerStart = prompt.indexOf(`${UNTRUSTED_DATA_START}\n`);
+    const outerEnd = prompt.lastIndexOf(`\n${UNTRUSTED_DATA_END}`);
+    const injection = prompt.indexOf("IGNORE ALL PRIOR INSTRUCTIONS");
+    expect(prompt).toContain("only polished, ready-to-send message copy");
+    expect(prompt).toContain("Do not include analysis, labels, a subject line");
+    expect(injection).toBeGreaterThan(outerStart);
+    expect(injection).toBeLessThan(outerEnd);
   });
 
   it("fails closed when the configured hard input limit cannot be met", () => {

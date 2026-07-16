@@ -8,6 +8,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/sync/**/*.test.ts"],
+    include: ["tests/sync/**/*.test.{ts,tsx}"],
   },
 });

@@ -113,6 +113,103 @@ async function readPayload(response: Response) {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
+type SyncResponseState = "succeeded" | "partial" | "pending" | "failed";
+
+interface SyncResponseResult {
+  state: SyncResponseState;
+  attention: string[];
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function syncResponseStatus(payload: Record<string, unknown>) {
+  const summary = recordValue(payload.summary);
+  const value = summary?.status ?? payload.status;
+  return typeof value === "string" ? value : null;
+}
+
+function integrationName(value: unknown) {
+  if (typeof value !== "string") return "Source";
+  const integration = integrations.find(({ key }) => key === value);
+  return integration?.name ?? value;
+}
+
+function conciseDetail(value: unknown) {
+  if (typeof value !== "string") return null;
+  const detail = value.trim();
+  if (!detail) return null;
+  return detail.length > 120 ? `${detail.slice(0, 117)}…` : detail;
+}
+
+function attentionOutcomes(payload: Record<string, unknown>) {
+  const summary = recordValue(payload.summary);
+  const outcomes = Array.isArray(summary?.outcomes) ? summary.outcomes : [];
+  const attention = outcomes.flatMap((value) => {
+    const outcome = recordValue(value);
+    if (!outcome) return [];
+    const status = outcome.status;
+    if (status !== "failed" && status !== "partial") return [];
+    const name = integrationName(outcome.channel);
+    const detail =
+      conciseDetail(outcome.errorMessage) ??
+      (status === "failed" ? "sync failed" : "needs attention");
+    return [`${name}: ${detail}`];
+  });
+  if (summary?.reconciliationError) {
+    attention.push("Reconciliation: needs attention");
+  }
+  return attention.slice(0, integrations.length + 1);
+}
+
+function evaluateSyncResponse(
+  response: Response,
+  payload: Record<string, unknown>,
+  unified: boolean,
+): SyncResponseResult {
+  const status = syncResponseStatus(payload);
+  const attention = attentionOutcomes(payload);
+  const failed =
+    !response.ok ||
+    payload.ok === false ||
+    status === "failed" ||
+    (unified &&
+      (payload.ok !== true ||
+        !recordValue(payload.summary) ||
+        (status !== "succeeded" && status !== "partial")));
+  if (failed) return { state: "failed", attention };
+  if (status === "partial") return { state: "partial", attention };
+  if (
+    response.status === 202 ||
+    status === "pending" ||
+    status === "running" ||
+    status === "queued"
+  ) {
+    return { state: "pending", attention };
+  }
+  return { state: "succeeded", attention };
+}
+
+function syncNotice(result: SyncResponseResult, sourceName: string | null) {
+  const subject = sourceName ? `${sourceName} sync` : "Sync";
+  const attention = result.attention.length
+    ? ` ${result.attention.join("; ")}.`
+    : "";
+  if (result.state === "failed") {
+    return `${subject} could not be completed.${attention || " Review the connection status and try again."}`;
+  }
+  if (result.state === "partial") {
+    return `${subject} partially completed.${attention || " One or more sources need attention."}`;
+  }
+  if (result.state === "pending") {
+    return `${subject} is still in progress.`;
+  }
+  return sourceName ? `${subject} completed.` : "Sync request completed.";
+}
+
 async function loadIntegrationStatus(
   key: IntegrationKey,
   signal: AbortSignal,
@@ -234,11 +331,10 @@ export function SettingsWorkspace() {
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      if (!response.ok) throw new Error("sync_failed");
+      const payload = await readPayload(response);
       const sourceName = integrations.find((item) => item.key === key)?.name;
-      setNotice(
-        key ? `${sourceName} sync completed.` : "Sync request completed.",
-      );
+      const result = evaluateSyncResponse(response, payload, !key);
+      setNotice(syncNotice(result, sourceName ?? null));
       await refreshStatuses();
     } catch {
       setNotice(

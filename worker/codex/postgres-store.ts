@@ -10,7 +10,12 @@ import {
 
 import { WorkerError } from "./errors";
 import { normalizeCompanyName, preserveManualOverrides } from "./normalization";
-import { workerAnalysisResultSchema, type ClassificationOutput } from "./schema";
+import {
+  classificationWorkerAnalysisResultSchema,
+  draftWorkerAnalysisResultSchema,
+  type ClassificationOutput,
+  type DraftOutreachOutput,
+} from "./schema";
 import type {
   AnalysisContext,
   AnalysisJobStore,
@@ -62,6 +67,18 @@ interface ParticipantRow {
 
 interface OverrideRow {
   manualOverrides: ManualOverride[];
+}
+
+interface OutreachPlanContextRow {
+  id: string;
+  contactId: string;
+  companyId: string | null;
+  status: string;
+  objective: string;
+  preferredChannels: string[];
+  nextTouchAt: Date | null;
+  suggestedDraft: string | null;
+  metadata: JsonObject;
 }
 
 type Database = ReturnType<typeof postgres>;
@@ -141,7 +158,10 @@ function safeFailureMessage(code: string): string {
 export class PostgresAnalysisJobStore implements AnalysisJobStore {
   private readonly sql: Database;
 
-  constructor(databaseUrl: string) {
+  constructor(
+    databaseUrl: string,
+    private readonly maxDraftContextMessages = 40,
+  ) {
     this.sql = postgres(databaseUrl, {
       max: 2,
       idle_timeout: 20,
@@ -281,14 +301,92 @@ export class PostgresAnalysisJobStore implements AnalysisJobStore {
       `;
       entitySnapshot = companyRows[0] ?? {};
     } else if (job.entityType === "outreach_plan") {
-      const planRows = await this.sql<JsonObject[]>`
+      const planRows = await this.sql<OutreachPlanContextRow[]>`
         select id, contact_id, company_id, status, objective, preferred_channels,
                next_touch_at, suggested_draft, metadata
         from outreach_plans
         where id = ${job.entityId}
         limit 1
       `;
-      entitySnapshot = planRows[0] ?? {};
+      const plan = planRows[0];
+      if (!plan) {
+        throw new WorkerError("job_unsupported", "The outreach plan no longer exists.");
+      }
+
+      if (job.jobType === "draft_outreach") {
+        const contactRows = await this.sql<
+          {
+            id: string;
+            companyId: string | null;
+            displayName: string;
+            primaryEmail: string | null;
+            title: string | null;
+            seniority: string | null;
+            relationshipStage: string;
+            replyState: string;
+            notes: string | null;
+            metadata: JsonObject;
+          }[]
+        >`
+          select id, company_id, display_name, primary_email, title, seniority,
+                 relationship_stage, reply_state, notes, metadata
+          from contacts
+          where id = ${plan.contactId}
+          limit 1
+        `;
+        const contact = contactRows[0];
+        if (!contact) {
+          throw new WorkerError("job_unsupported", "The outreach plan contact no longer exists.");
+        }
+        const companyId = plan.companyId ?? contact.companyId;
+        const companyRows = companyId
+          ? await this.sql<
+              {
+                id: string;
+                name: string;
+                domain: string | null;
+                industry: string | null;
+                sizeRange: string | null;
+                location: string | null;
+                description: string | null;
+                metadata: JsonObject;
+              }[]
+            >`
+              select id, name, domain, industry, size_range, location, description, metadata
+              from companies
+              where id = ${companyId}
+              limit 1
+            `
+          : [];
+        entitySnapshot = {
+          plan,
+          contact,
+          company: companyRows[0] ?? null,
+        };
+
+        const conversationRows = await this.sql<{ id: string }[]>`
+          select conversation.id
+          from conversations as conversation
+          where exists (
+            select 1
+            from conversation_participants as participant
+            where participant.conversation_id = conversation.id
+              and participant.contact_id = ${plan.contactId}
+          )
+          order by coalesce(
+                     conversation.last_message_at,
+                     (select max(message.sent_at)
+                      from messages as message
+                      where message.conversation_id = conversation.id),
+                     conversation.updated_at
+                   ) desc,
+                   conversation.id desc
+          limit 1
+        `;
+        conversationId = conversationRows[0]?.id ?? null;
+      } else {
+        entitySnapshot = { ...plan };
+      }
     } else {
       throw new WorkerError(
         "job_unsupported",
@@ -325,12 +423,25 @@ export class PostgresAnalysisJobStore implements AnalysisJobStore {
       throw new WorkerError("job_unsupported", "The analysis conversation no longer exists.");
     }
 
-    const messageRows = await this.sql<MessageRow[]>`
-      select id, channel, direction, sent_at, subject, body_text, snippet, source_provenance
-      from messages
-      where conversation_id = ${conversationId}
-      order by sent_at asc, id asc
-    `;
+    const messageRows =
+      job.jobType === "draft_outreach"
+        ? await this.sql<MessageRow[]>`
+            select id, channel, direction, sent_at, subject, body_text, snippet, source_provenance
+            from (
+              select id, channel, direction, sent_at, subject, body_text, snippet, source_provenance
+              from messages
+              where conversation_id = ${conversationId}
+              order by sent_at desc, id desc
+              limit ${this.maxDraftContextMessages}
+            ) as recent_messages
+            order by sent_at asc, id asc
+          `
+        : await this.sql<MessageRow[]>`
+            select id, channel, direction, sent_at, subject, body_text, snippet, source_provenance
+            from messages
+            where conversation_id = ${conversationId}
+            order by sent_at asc, id asc
+          `;
     const participantRows = await this.sql<ParticipantRow[]>`
       select participant.external_participant_id,
              participant.role,
@@ -350,18 +461,34 @@ export class PostgresAnalysisJobStore implements AnalysisJobStore {
       ...(conversation.subject === null ? {} : { subject: conversation.subject }),
       participants: participantRows.map(toParticipantContext),
       messages: messageRows.map(toMessageContext),
-      entitySnapshot: {
-        id: conversation.id,
-        preview: conversation.preview,
-        replyState: conversation.replyState,
-        metadata: conversation.metadata,
-      },
+      entitySnapshot:
+        job.jobType === "draft_outreach"
+          ? {
+              ...entitySnapshot,
+              conversation: {
+                id: conversation.id,
+                preview: conversation.preview,
+                replyState: conversation.replyState,
+                metadata: conversation.metadata,
+              },
+            }
+          : {
+              id: conversation.id,
+              preview: conversation.preview,
+              replyState: conversation.replyState,
+              metadata: conversation.metadata,
+            },
       evidence: flattenEvidence(messageRows),
     };
   }
 
   async complete(job: ClaimedAnalysisJob, result: AnalysisResultInput, now: Date): Promise<void> {
-    const parsed = workerAnalysisResultSchema.parse(result);
+    if (job.jobType === "draft_outreach") {
+      await this.completeDraft(job, result, now);
+      return;
+    }
+
+    const parsed = classificationWorkerAnalysisResultSchema.parse(result);
     const output = parsed.result;
 
     await this.sql.begin(async (transaction) => {
@@ -405,6 +532,78 @@ export class PostgresAnalysisJobStore implements AnalysisJobStore {
       } else if (job.entityType === "company") {
         await this.applyCompanyNormalization(transaction, job.entityId, job.id, output, now);
       }
+
+      const completed = await transaction`
+        update analysis_jobs
+        set status = 'succeeded', completed_at = ${now}, failed_at = null,
+            error_code = null, error_message = null, updated_at = ${now}
+        where id = ${job.id}
+          and status = 'running'
+          and attempt_count = ${job.attemptCount}
+        returning id
+      `;
+      if (completed.length !== 1) {
+        throw new WorkerError("transaction_conflict", "The analysis job could not be completed atomically.");
+      }
+    });
+  }
+
+  private async completeDraft(
+    job: ClaimedAnalysisJob,
+    result: AnalysisResultInput,
+    now: Date,
+  ): Promise<void> {
+    if (job.entityType !== "outreach_plan") {
+      throw new WorkerError("job_unsupported", "Draft outreach jobs must target an outreach plan.");
+    }
+    const parsed = draftWorkerAnalysisResultSchema.parse(result);
+    const output: DraftOutreachOutput = parsed.result;
+
+    await this.sql.begin(async (transaction) => {
+      const lockedJobs = await transaction<{ status: string; attemptCount: number }[]>`
+        select status, attempt_count
+        from analysis_jobs
+        where id = ${job.id}
+        for update
+      `;
+      const lockedJob = lockedJobs[0];
+      if (!lockedJob || lockedJob.status !== "running" || lockedJob.attemptCount !== job.attemptCount) {
+        throw new WorkerError("job_not_running", "The analysis job lease is no longer active.");
+      }
+
+      const plans = await transaction<(OverrideRow & { suggestedDraft: string | null })[]>`
+        select suggested_draft, manual_overrides
+        from outreach_plans
+        where id = ${job.entityId}
+        for update
+      `;
+      const plan = plans[0];
+      if (!plan) throw new WorkerError("job_unsupported", "The outreach plan no longer exists.");
+
+      await transaction`
+        insert into analysis_results (
+          job_id, entity_type, entity_id, result_type, schema_version, result, evidence,
+          evidence_message_ids, confidence, accepted_at, created_at, updated_at
+        ) values (
+          ${job.id}, ${job.entityType}, ${job.entityId}, ${parsed.resultType},
+          ${parsed.schemaVersion}, ${transaction.json(jsonParameter(output))},
+          ${transaction.json(jsonParameter(parsed.evidence))},
+          ${transaction.array(output.evidenceMessageIds, 2950)}, ${output.confidence},
+          ${now}, ${now}, ${now}
+        )
+      `;
+
+      const nextPlan = preserveManualOverrides(
+        plan,
+        { suggestedDraft: output.text },
+        plan.manualOverrides,
+      );
+      await transaction`
+        update outreach_plans
+        set suggested_draft = ${nextPlan.suggestedDraft},
+            updated_at = ${now}
+        where id = ${job.entityId}
+      `;
 
       const completed = await transaction`
         update analysis_jobs

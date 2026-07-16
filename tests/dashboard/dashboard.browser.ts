@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { encode } from "next-auth/jwt";
 
-const authSecret = "threadline-local-browser-secret-2026";
+const authSecret = "threadline-e2e-auth-secret-2026-07-16";
 
 test.beforeEach(async ({ context }) => {
   const sessionToken = await encode({
     token: {
       name: "Viraat",
-      email: "owner@example.com",
+      email: "owner@threadline.test",
       sub: "threadline-owner",
     },
     secret: authSecret,

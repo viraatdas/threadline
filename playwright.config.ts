@@ -36,7 +36,7 @@ export default defineConfig({
       AUTH_GOOGLE_SECRET: E2E_GOOGLE_SECRET,
       AUTH_URL: baseURL,
       OWNER_EMAIL: E2E_OWNER_EMAIL,
-      DATABASE_URL: "postgres://threadline:threadline@127.0.0.1:65432/threadline_e2e",
+      DATABASE_URL: "postgres://threadline:threadline@127.0.0.1:65432/threadline_test",
       INTEGRATION_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
       INTEGRATION_ENCRYPTION_KEY_VERSION: "1",
       CRON_SECRET: "threadline-e2e-cron-secret",

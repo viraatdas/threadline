@@ -107,10 +107,28 @@ export const classificationOutputSchema = z
     }
   });
 
-export const workerAnalysisResultSchema = analysisResultInputSchema.extend({
+export const draftOutreachOutputSchema = z
+  .object({
+    text: z.string().trim().min(1).max(100_000),
+    confidence: z.number().min(0).max(1),
+    evidenceMessageIds: z.array(z.string().uuid()).max(64),
+  })
+  .strict();
+
+export const classificationWorkerAnalysisResultSchema = analysisResultInputSchema.extend({
   resultType: z.literal("outreach_classification"),
   result: classificationOutputSchema,
 });
+
+export const draftWorkerAnalysisResultSchema = analysisResultInputSchema.extend({
+  resultType: z.literal("outreach_draft"),
+  result: draftOutreachOutputSchema,
+});
+
+export const workerAnalysisResultSchema = z.discriminatedUnion("resultType", [
+  classificationWorkerAnalysisResultSchema,
+  draftWorkerAnalysisResultSchema,
+]);
 
 export const workerAnalysisEnvelopeSchema = z
   .object({
@@ -153,10 +171,15 @@ export const workerAnalysisEnvelopeSchema = z
   .strict();
 
 export type ClassificationOutput = z.infer<typeof classificationOutputSchema>;
+export type DraftOutreachOutput = z.infer<typeof draftOutreachOutputSchema>;
 export type WorkerAnalysisResult = z.infer<typeof workerAnalysisResultSchema>;
 
 export function parseClassificationOutput(value: unknown): ClassificationOutput {
   return classificationOutputSchema.parse(value);
+}
+
+export function parseDraftOutreachOutput(value: unknown): DraftOutreachOutput {
+  return draftOutreachOutputSchema.parse(value);
 }
 
 const injectedInstructionPatterns = [
@@ -166,9 +189,12 @@ const injectedInstructionPatterns = [
   /\b(?:toolcall|shell command|execute command|run command)\b/iu,
 ];
 
-export function assertNoInjectedInstructions(output: ClassificationOutput): void {
-  const narrative = [output.nextAction.summary, output.rationale].join("\n");
+export function assertNoInjectedInstructions(
+  output: ClassificationOutput | DraftOutreachOutput,
+): void {
+  const narrative =
+    "text" in output ? output.text : [output.nextAction.summary, output.rationale].join("\n");
   if (injectedInstructionPatterns.some((pattern) => pattern.test(narrative))) {
-    throw new Error("Classification narratives contain injected instruction or secret-access text.");
+    throw new Error("Model-authored text contains injected instruction or secret-access text.");
   }
 }

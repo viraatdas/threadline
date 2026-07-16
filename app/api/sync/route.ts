@@ -38,6 +38,9 @@ export async function POST(request: Request) {
     trigger: "manual",
     invocationId,
     signal: request.signal,
+    maxConcurrency: 3,
+    maxAttempts: 2,
+    timeoutMs: 120_000,
     ...(channels ? { channels } : {}),
     ...(parsed.data.limit ? { limit: parsed.data.limit } : {}),
     ...(parsed.data.since ? { since: new Date(parsed.data.since) } : {}),
@@ -45,5 +48,6 @@ export async function POST(request: Request) {
       ? { gmailBackfillDays: parsed.data.gmailBackfillDays }
       : {}),
   });
-  return NextResponse.json({ ok: summary.status !== "failed", summary });
+  const ok = summary.status !== "failed";
+  return NextResponse.json({ ok, summary }, { status: ok ? 200 : 502 });
 }

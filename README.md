@@ -16,7 +16,7 @@ The v1 integration contract is read-only. Threadline may ingest data, classify o
 
 ## Setup
 
-1. Install Node 22+ and pnpm 10+.
+1. Install Node 24 and pnpm 10+.
 2. Copy `.env.example` to `.env.local` and fill in the required values.
 3. Run `pnpm install`.
 4. Apply the schema with `pnpm db:migrate`.
@@ -37,6 +37,11 @@ openssl rand -base64 32
 - `pnpm db:generate` — generate a migration from `lib/db/schema.ts`.
 - `pnpm db:migrate` — apply checked-in migrations to `DATABASE_URL`.
 - `pnpm e2e` — run the owner-authenticated Playwright release suite.
+- `pnpm test:dashboard-browser` — run desktop and mobile dashboard browser checks.
+
+The People/Outreach and Codex worker integration suites exercise destructive
+database flows when `TEST_DATABASE_URL` is set. Point it only at a disposable
+database; CI uses the isolated `threadline_test` service database.
 
 ## Production deployment
 
@@ -54,7 +59,7 @@ Vercel cron calls `/api/cron/sync` daily at `15:00 UTC` with `CRON_SECRET`; owne
 
 ## Release verification
 
-Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm e2e` before every production deployment. After deployment, verify owner sign-in, migrations, `/settings` integration health, manual sync, the Fly `/readyz` check, restart persistence of `/data/codex/auth.json`, and the absence of send/reply/post controls.
+Run `pnpm check` before every production deployment. The command includes schema consistency, unit/integration suites, the production build, the owner-authenticated release flow, and desktop/mobile dashboard browser checks. After deployment, verify owner sign-in, migrations, `/settings` integration health, manual sync, the Fly `/readyz` check, restart persistence of `/data/codex/auth.json`, and the absence of send/reply/post controls.
 
 ## Security notes
 
@@ -73,3 +78,9 @@ Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm e2e` bef
 - Channel implementations should live in their own directories and depend on these interfaces rather than changing shared manifests or schema ad hoc.
 
 Analysis jobs deliberately target a local, subscription-backed runner extension (`codex-cli`) rather than a hosted LLM API. No OpenAI API key is part of the foundation.
+
+People and Outreach load their current state from Postgres and persist owner
+edits, corrections, merges, plans, reschedules, retries, and completions through
+audited server actions. Draft jobs target an outreach plan; the worker loads
+bounded recent relationship evidence, validates a strict `outreach_draft`
+result, and stores the suggestion without overwriting an explicit owner draft.

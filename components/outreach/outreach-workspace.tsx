@@ -39,10 +39,19 @@ import type {
 import { UndoNotice } from "@/components/people/undo-notice";
 import { groupOutreachPlans } from "@/components/outreach/queue-utils";
 import { PageHeader } from "@/components/shell";
+import type {
+  CompleteOutreachPlanAction,
+  RescheduleOutreachPlanAction,
+  RetryOutreachDraftAction,
+} from "@/components/workspace-actions";
+import { workspaceActionError } from "@/components/workspace-actions";
 
 interface OutreachWorkspaceProps {
   data: PeopleWorkspaceData;
   initialFilters: OutreachFilters;
+  completePlanAction?: CompleteOutreachPlanAction;
+  reschedulePlanAction?: RescheduleOutreachPlanAction;
+  retryDraftAction?: RetryOutreachDraftAction;
 }
 
 interface UndoState {
@@ -180,12 +189,16 @@ function DraftStatus({
 export function OutreachWorkspace({
   data,
   initialFilters,
+  completePlanAction,
+  reschedulePlanAction,
+  retryDraftAction,
 }: OutreachWorkspaceProps) {
   const [plans, setPlans] = useState(data.plans);
   const [filters, setFilters] = useState(initialFilters);
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function updateFilters(patch: Partial<OutreachFilters>) {
     setFilters((current) => {
@@ -234,10 +247,11 @@ export function OutreachWorkspace({
     filters.channel !== "all" ||
     filters.ownerState !== "all";
 
-  function completePlan(planId: string) {
+  async function completePlan(planId: string) {
     const plan = plans.find((item) => item.id === planId);
     if (!plan) return;
     const snapshot = plans;
+    setActionError(null);
     setPlans((current) =>
       current.map((item) =>
         item.id === planId
@@ -260,10 +274,29 @@ export function OutreachWorkspace({
           : item,
       ),
     );
-    setUndo({
-      plans: snapshot,
-      message: `${data.people.find((person) => person.id === plan.contactId)?.displayName ?? "Plan"} marked complete.`,
-    });
+    if (!completePlanAction) {
+      setUndo({
+        plans: snapshot,
+        message: `${data.people.find((person) => person.id === plan.contactId)?.displayName ?? "Plan"} marked complete.`,
+      });
+      return;
+    }
+
+    setUndo(null);
+    try {
+      const result = await completePlanAction(planId);
+      const error = workspaceActionError(
+        result,
+        "The outreach plan could not be completed.",
+      );
+      if (error) {
+        setPlans(snapshot);
+        setActionError(error);
+      }
+    } catch {
+      setPlans(snapshot);
+      setActionError("The outreach plan could not be completed. Check your connection and try again.");
+    }
   }
 
   function reschedule(formData: FormData) {
@@ -272,6 +305,7 @@ export function OutreachWorkspace({
     if (!date) return;
     const nextTouchAt = new Date(`${date}T09:30:00`).toISOString();
     const snapshot = plans;
+    setActionError(null);
     setPlans((current) =>
       current.map((plan) =>
         plan.id === reschedulingPlan.id
@@ -295,12 +329,82 @@ export function OutreachWorkspace({
           : plan,
       ),
     );
-    setUndo({ plans: snapshot, message: "Follow-up review rescheduled." });
     setReschedulingId(null);
+
+    if (!reschedulePlanAction) {
+      setUndo({ plans: snapshot, message: "Follow-up review rescheduled." });
+      return;
+    }
+
+    setUndo(null);
+    void (async () => {
+      try {
+        const result = await reschedulePlanAction(
+          reschedulingPlan.id,
+          formData,
+        );
+        const error = workspaceActionError(
+          result,
+          "The follow-up could not be rescheduled.",
+        );
+        if (error) {
+          setPlans(snapshot);
+          setActionError(error);
+        } else if (result.ok) {
+          setPlans((current) =>
+            current.map((plan) =>
+              plan.id === result.data.planId
+                ? { ...plan, nextTouchAt: result.data.nextTouchAt }
+                : plan,
+            ),
+          );
+        }
+      } catch {
+        setPlans(snapshot);
+        setActionError(
+          "The follow-up could not be rescheduled. Check your connection and try again.",
+        );
+      }
+    })();
   }
 
-  function retrySuggestion(planId: string) {
+  async function retrySuggestion(planId: string) {
     const snapshot = plans;
+    setActionError(null);
+
+    if (retryDraftAction) {
+      setUndo(null);
+      setPlans((current) =>
+        current.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                suggestedDraft: {
+                  status: "queued",
+                  evidenceCount: plan.suggestedDraft.evidenceCount,
+                  runner: plan.suggestedDraft.runner,
+                },
+              }
+            : plan,
+        ),
+      );
+      try {
+        const result = await retryDraftAction(planId);
+        const error = workspaceActionError(
+          result,
+          "The draft retry could not be queued.",
+        );
+        if (error) {
+          setPlans(snapshot);
+          setActionError(error);
+        }
+      } catch {
+        setPlans(snapshot);
+        setActionError("The draft retry could not be queued. Check your connection and try again.");
+      }
+      return;
+    }
+
     setPlans((current) =>
       current.map((plan) =>
         plan.id === planId
@@ -331,6 +435,14 @@ export function OutreachWorkspace({
 
   return (
     <div className="space-y-8">
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] text-danger"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <PageHeader
         eyebrow="Follow-up workspace"
         title="Outreach queue"

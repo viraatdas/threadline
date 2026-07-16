@@ -9,12 +9,14 @@ export {
 export { WorkerHealth } from "./health";
 export { preserveManualOverrides } from "./normalization";
 export { PostgresAnalysisJobStore } from "./postgres-store";
-export { buildClassificationPrompt } from "./prompt";
+export { buildClassificationPrompt, buildDraftOutreachPrompt } from "./prompt";
 export { CodexCliAnalysisRunner } from "./runner";
 export {
   assertNoInjectedInstructions,
   classificationOutputSchema,
+  draftOutreachOutputSchema,
   parseClassificationOutput,
+  parseDraftOutreachOutput,
 } from "./schema";
 export { CodexWorker, type RunOneOutcome } from "./worker";
 export type { AnalysisJobStore, ClaimedAnalysisJob } from "./types";

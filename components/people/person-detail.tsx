@@ -40,15 +40,25 @@ import type {
   ResolvedField,
 } from "@/components/people/types";
 import { UndoNotice } from "@/components/people/undo-notice";
+import type {
+  ContactCorrectionField,
+  CorrectContactAction,
+  EditContactAction,
+  UpsertOutreachPlanAction,
+} from "@/components/workspace-actions";
+import { workspaceActionError } from "@/components/workspace-actions";
 
 interface PersonDetailProps {
   initialPerson: PersonRecord;
   company: CompanyRecord | null;
   initialPlan: OutreachPlanView | null;
   now: string;
+  editContactAction?: EditContactAction;
+  correctContactAction?: CorrectContactAction;
+  upsertPlanAction?: UpsertOutreachPlanAction;
 }
 
-type CorrectableField = "title" | "company" | "location";
+type CorrectableField = ContactCorrectionField;
 
 interface UndoState {
   person: PersonRecord;
@@ -101,6 +111,9 @@ export function PersonDetail({
   company,
   initialPlan,
   now,
+  editContactAction,
+  correctContactAction,
+  upsertPlanAction,
 }: PersonDetailProps) {
   const [person, setPerson] = useState(initialPerson);
   const [plan, setPlan] = useState(initialPlan);
@@ -109,21 +122,25 @@ export function PersonDetail({
   const [planning, setPlanning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [undo, setUndo] = useState<UndoState | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function checkpoint(message: string) {
     setUndo({ person, plan, message });
   }
 
-  function handleEdit(formData: FormData) {
-    checkpoint("Relationship edits saved.");
+  async function handleEdit(formData: FormData) {
+    const snapshot = person;
+    if (!editContactAction) checkpoint("Relationship edits saved.");
+    else setUndo(null);
+    setActionError(null);
     const displayName = String(
       formData.get("displayName") ?? person.displayName,
     ).trim();
     const email = String(formData.get("email") ?? "").trim();
     const notes = String(formData.get("notes") ?? "").trim();
     const occurredAt = new Date().toISOString();
-    setPerson((current) => ({
-      ...current,
+    const nextPerson: PersonRecord = {
+      ...person,
       displayName,
       primaryEmail: email || null,
       notes: notes || null,
@@ -137,38 +154,73 @@ export function PersonDetail({
           detail: "Updated owner-managed identity or notes.",
           outcome: "success",
         },
-        ...current.audit,
+        ...person.audit,
       ],
-    }));
+    };
+    setPerson(nextPerson);
     setEditing(false);
+
+    if (!editContactAction) return;
+    try {
+      const result = await editContactAction(person.id, formData);
+      const error = workspaceActionError(
+        result,
+        "The relationship changes could not be saved.",
+      );
+      if (error) {
+        setPerson(snapshot);
+        setActionError(error);
+      } else if (result.ok) {
+        setPerson((current) => ({
+          ...current,
+          audit: current.audit.map((entry, index) =>
+            index === 0
+              ? {
+                  ...entry,
+                  actor: result.data.actorEmail,
+                  occurredAt: result.data.occurredAt,
+                }
+              : entry,
+          ),
+        }));
+      }
+    } catch {
+      setPerson(snapshot);
+      setActionError("The relationship changes could not be saved. Check your connection and try again.");
+    }
   }
 
-  function handleCorrection(formData: FormData) {
+  async function handleCorrection(formData: FormData) {
     if (!correcting) return;
+    const correctedField = correcting;
+    const snapshot = person;
     const value = String(formData.get("value") ?? "").trim();
     const reason = String(formData.get("reason") ?? "").trim();
     if (!value) return;
 
-    checkpoint(
-      `${correcting[0]?.toUpperCase()}${correcting.slice(1)} corrected.`,
-    );
+    if (!correctContactAction) {
+      checkpoint(
+        `${correctedField[0]?.toUpperCase()}${correctedField.slice(1)} corrected.`,
+      );
+    } else setUndo(null);
+    setActionError(null);
     const occurredAt = new Date().toISOString();
-    setPerson((current) => ({
-      ...current,
-      [correcting]: {
-        ...current[correcting],
+    const nextPerson: PersonRecord = {
+      ...person,
+      [correctedField]: {
+        ...person[correctedField],
         value,
         kind: "override",
         confidence: 1,
         overrides: [
           {
-            field: correcting,
+            field: correctedField,
             value,
             ...(reason ? { reason } : {}),
             overriddenAt: occurredAt,
             overriddenBy: "owner@threadline.local",
           },
-          ...current[correcting].overrides,
+          ...person[correctedField].overrides,
         ],
       },
       hasManualOverride: true,
@@ -177,17 +229,53 @@ export function PersonDetail({
           id: `correction-${Date.now()}`,
           occurredAt,
           actor: "owner@threadline.local",
-          action: `Corrected ${correcting}`,
-          detail: reason || `Set ${correcting} to ${value}.`,
+          action: `Corrected ${correctedField}`,
+          detail: reason || `Set ${correctedField} to ${value}.`,
           outcome: "success",
         },
-        ...current.audit,
+        ...person.audit,
       ],
-    }));
+    };
+    setPerson(nextPerson);
     setCorrecting(null);
+
+    if (!correctContactAction) return;
+    try {
+      const result = await correctContactAction(
+        person.id,
+        correctedField,
+        formData,
+      );
+      const error = workspaceActionError(
+        result,
+        "The relationship correction could not be saved.",
+      );
+      if (error) {
+        setPerson(snapshot);
+        setActionError(error);
+      } else if (result.ok) {
+        setPerson((current) => ({
+          ...current,
+          audit: current.audit.map((entry, index) =>
+            index === 0
+              ? {
+                  ...entry,
+                  actor: result.data.actorEmail,
+                  occurredAt: result.data.occurredAt,
+                }
+              : entry,
+          ),
+        }));
+      }
+    } catch {
+      setPerson(snapshot);
+      setActionError("The relationship correction could not be saved. Check your connection and try again.");
+    }
   }
 
-  function handlePlan(formData: FormData) {
+  async function handlePlan(formData: FormData) {
+    const personSnapshot = person;
+    const planSnapshot = plan;
     const objective = String(formData.get("objective") ?? "").trim();
     const date = String(formData.get("nextTouchAt") ?? "");
     const channel = String(
@@ -197,10 +285,13 @@ export function PersonDetail({
       ? new Date(`${date}T09:30:00`).toISOString()
       : null;
     const occurredAt = new Date().toISOString();
-    checkpoint(plan ? "Outreach plan updated." : "Outreach plan created.");
-    setPlan((current) => ({
+    if (!upsertPlanAction) {
+      checkpoint(plan ? "Outreach plan updated." : "Outreach plan created.");
+    } else setUndo(null);
+    setActionError(null);
+    const nextPlan: OutreachPlanView = {
       id:
-        current?.id ??
+        plan?.id ??
         (typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `plan-${Date.now()}`),
@@ -210,39 +301,78 @@ export function PersonDetail({
       objective,
       preferredChannels: [channel],
       nextTouchAt,
-      cadenceIntervalDays: current?.cadenceIntervalDays ?? 7,
-      plannedTouchCount: current?.plannedTouchCount ?? 1,
-      completedTouchCount: current?.completedTouchCount ?? 0,
-      firstTouchAt: current?.firstTouchAt ?? person.firstTouchAt,
-      lastTouchAt: current?.lastTouchAt ?? person.lastTouchAt,
+      cadenceIntervalDays: plan?.cadenceIntervalDays ?? 7,
+      plannedTouchCount: plan?.plannedTouchCount ?? 1,
+      completedTouchCount: plan?.completedTouchCount ?? 0,
+      firstTouchAt: plan?.firstTouchAt ?? person.firstTouchAt,
+      lastTouchAt: plan?.lastTouchAt ?? person.lastTouchAt,
       completedAt: null,
       replyState: person.replyState,
-      suggestedDraft: current?.suggestedDraft ?? {
+      suggestedDraft: plan?.suggestedDraft ?? {
         status: "queued",
         evidenceCount: person.timeline.length,
         runner: "codex-cli",
       },
       hasManualOverride: true,
-      createdAt: current?.createdAt ?? occurredAt,
+      createdAt: plan?.createdAt ?? occurredAt,
       audit: [
         {
           id: `plan-${Date.now()}`,
           occurredAt,
           actor: "owner@threadline.local",
-          action: current ? "Plan updated" : "Plan created",
+          action: plan ? "Plan updated" : "Plan created",
           detail: `Next review planned for ${nextTouchAt ? formatDate(nextTouchAt) : "an unscheduled date"}.`,
           outcome: "success",
         },
-        ...(current?.audit ?? []),
+        ...(plan?.audit ?? []),
       ],
-    }));
-    setPerson((current) => ({
-      ...current,
+    };
+    const nextPerson: PersonRecord = {
+      ...person,
       plannedFollowUpAt: nextTouchAt,
       relationshipStage: "planned",
       hasManualOverride: true,
-    }));
+    };
+    setPlan(nextPlan);
+    setPerson(nextPerson);
     setPlanning(false);
+
+    if (!upsertPlanAction) return;
+    try {
+      const result = await upsertPlanAction(person.id, plan?.id ?? null, formData);
+      const error = workspaceActionError(
+        result,
+        "The outreach plan could not be saved.",
+      );
+      if (error) {
+        setPerson(personSnapshot);
+        setPlan(planSnapshot);
+        setActionError(error);
+      } else if (result.ok) {
+        setPlan((current) =>
+          current
+            ? {
+                ...current,
+                id: result.data.planId,
+                nextTouchAt: result.data.nextTouchAt,
+                audit: current.audit.map((entry, index) =>
+                  index === 0
+                    ? {
+                        ...entry,
+                        actor: result.data.actorEmail,
+                        occurredAt: result.data.occurredAt,
+                      }
+                    : entry,
+                ),
+              }
+            : current,
+        );
+      }
+    } catch {
+      setPerson(personSnapshot);
+      setPlan(planSnapshot);
+      setActionError("The outreach plan could not be saved. Check your connection and try again.");
+    }
   }
 
   async function copyDraft() {
@@ -256,6 +386,14 @@ export function PersonDetail({
 
   return (
     <div className="space-y-8">
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] text-danger"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <div className="border-b border-line pb-7">
         <Link
           href="/people"

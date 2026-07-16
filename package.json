@@ -5,7 +5,7 @@
   "description": "A quiet, owner-only relationship intelligence workspace.",
   "packageManager": "pnpm@10.30.3",
   "engines": {
-    "node": ">=22.0.0",
+    "node": "24.x",
     "pnpm": ">=10.0.0"
   },
   "pnpm": {
@@ -21,6 +21,7 @@
     "test": "pnpm test:unit && pnpm test:dashboard && pnpm test:people-outreach && pnpm test:gmail && pnpm test:linkedin && pnpm test:x && pnpm test:sync && pnpm test:codex-worker",
     "test:unit": "vitest run",
     "test:dashboard": "vitest run --config tests/dashboard/vitest.config.ts",
+    "test:dashboard-browser": "playwright test --config tests/dashboard/dashboard.playwright.config.ts",
     "test:people-outreach": "vitest run --config tests/people-outreach/vitest.config.ts",
     "test:gmail": "vitest run --config tests/gmail/vitest.config.ts",
     "test:linkedin": "vitest run --config tests/linkedin/vitest.config.ts",
@@ -35,7 +36,7 @@
     "db:migrate": "tsx lib/db/migrate.ts",
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm e2e"
+    "check": "pnpm lint && pnpm typecheck && pnpm db:check && pnpm test && pnpm build && pnpm e2e && pnpm test:dashboard-browser"
   },
   "dependencies": {
     "@jtsang/bird": "0.8.1",
@@ -75,7 +76,7 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
-    "@types/node": "26.1.1",
+    "@types/node": "^24.0.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitest/coverage-v8": "4.1.10",

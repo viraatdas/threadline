@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 
-import { PeopleWorkspace, workspaceData } from "@/components/people";
-import type { PeopleFilters } from "@/components/people";
+import { PeopleWorkspace } from "@/components/people/people-workspace";
+import type { PeopleFilters } from "@/components/people/types";
+import { loadPeopleListWorkspaceData } from "@/lib/db/workspace";
 import { CHANNEL_VALUES, REPLY_STATE_VALUES } from "@/lib/domain/constants";
+
+import { addContact, mergeContacts } from "../workspace-actions";
 
 export const metadata: Metadata = {
   title: "People",
@@ -49,14 +52,24 @@ export default async function PeoplePage({
 }) {
   const params = await searchParams;
   const mergeId = first(params.merge);
+  const demo = first(params.demo) === "1";
+  const data =
+    demo
+      ? (await import("@/components/people/sample-data")).workspaceData
+      : await loadPeopleListWorkspaceData();
   return (
     <PeopleWorkspace
-      data={workspaceData}
+      data={data}
       initialFilters={parseFilters(params)}
-      {...(mergeId &&
-      workspaceData.people.some((person) => person.id === mergeId)
+      {...(mergeId && data.people.some((person) => person.id === mergeId)
         ? { initialMergeSourceId: mergeId }
         : {})}
+      {...(demo
+        ? {}
+        : {
+            addContactAction: addContact,
+            mergeContactsAction: mergeContacts,
+          })}
     />
   );
 }

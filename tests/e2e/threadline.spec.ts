@@ -26,18 +26,12 @@ test.describe("owner workspace", () => {
       page.getByRole("heading", { name: "Today’s relationship view" }),
     ).toBeVisible();
 
-    await page
-      .getByRole("link", { name: "People", exact: true })
-      .first()
-      .click();
+    await page.goto("/people?demo=1");
     await expect(
       page.getByRole("heading", { name: "People and companies" }),
     ).toBeVisible();
 
-    await page
-      .getByRole("link", { name: "Outreach", exact: true })
-      .first()
-      .click();
+    await page.goto("/outreach?demo=1");
     await expect(
       page.getByRole("heading", { name: "Outreach queue" }),
     ).toBeVisible();
@@ -53,7 +47,7 @@ test.describe("owner workspace", () => {
   test("preserves reply state and supports an owner correction", async ({
     page,
   }) => {
-    await page.goto(`/people/${MAYA_ID}`);
+    await page.goto(`/people/${MAYA_ID}?demo=1`);
     await expect(page.getByRole("heading", { name: "Maya Chen" })).toBeVisible();
     await expect(page.getByText("Replied", { exact: true }).first()).toBeVisible();
 

@@ -34,11 +34,18 @@ import type {
 } from "@/components/people/types";
 import { UndoNotice } from "@/components/people/undo-notice";
 import { PageHeader } from "@/components/shell";
+import type {
+  AddContactAction,
+  MergeContactsAction,
+} from "@/components/workspace-actions";
+import { workspaceActionError } from "@/components/workspace-actions";
 
 interface PeopleWorkspaceProps {
   data: PeopleWorkspaceData;
   initialFilters: PeopleFilters;
   initialMergeSourceId?: string;
+  addContactAction?: AddContactAction;
+  mergeContactsAction?: MergeContactsAction;
 }
 
 interface UndoState {
@@ -189,6 +196,8 @@ export function PeopleWorkspace({
   data,
   initialFilters,
   initialMergeSourceId,
+  addContactAction,
+  mergeContactsAction,
 }: PeopleWorkspaceProps) {
   const [people, setPeople] = useState(data.people);
   const [filters, setFilters] = useState(initialFilters);
@@ -198,6 +207,7 @@ export function PeopleWorkspace({
   );
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [undo, setUndo] = useState<UndoState | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function updateFilters(patch: Partial<PeopleFilters>) {
     setFilters((current) => {
@@ -254,12 +264,60 @@ export function PeopleWorkspace({
   function handleAdd(formData: FormData) {
     const snapshot = people;
     const person = makeManualPerson(formData);
+    setActionError(null);
     setPeople((current) => [person, ...current]);
-    setUndo({
-      people: snapshot,
-      message: `${person.displayName} was added manually.`,
-    });
     setAddOpen(false);
+
+    if (!addContactAction) {
+      setUndo({
+        people: snapshot,
+        message: `${person.displayName} was added manually.`,
+      });
+      return;
+    }
+
+    setUndo(null);
+    void (async () => {
+      try {
+        const result = await addContactAction(formData);
+        const error = workspaceActionError(
+          result,
+          "The relationship could not be added.",
+        );
+        if (error) {
+          setPeople(snapshot);
+          setActionError(error);
+          return;
+        }
+        if (result.ok) {
+          setPeople((current) =>
+            current.map((item) =>
+              item.id === person.id
+                ? {
+                    ...item,
+                    id: result.data.contactId,
+                    companyId: result.data.companyId,
+                    audit: item.audit.map((entry, index) =>
+                      index === 0
+                        ? {
+                            ...entry,
+                            actor: result.data.actorEmail,
+                            occurredAt: result.data.occurredAt,
+                          }
+                        : entry,
+                    ),
+                  }
+                : item,
+            ),
+          );
+        }
+      } catch {
+        setPeople(snapshot);
+        setActionError(
+          "The relationship could not be added. Check your connection and try again.",
+        );
+      }
+    })();
   }
 
   function handleMerge() {
@@ -270,6 +328,7 @@ export function PeopleWorkspace({
     if (!source || !target) return;
 
     const snapshot = people;
+    setActionError(null);
     const mergedTarget: PersonRecord = {
       ...target,
       touchCount: target.touchCount + source.touchCount,
@@ -306,12 +365,36 @@ export function PeopleWorkspace({
         .filter((person) => person.id !== source.id)
         .map((person) => (person.id === target.id ? mergedTarget : person)),
     );
-    setUndo({
-      people: snapshot,
-      message: `${source.displayName} was merged into ${target.displayName}.`,
-    });
     setMergeSourceId(null);
     setMergeTargetId("");
+
+    if (!mergeContactsAction) {
+      setUndo({
+        people: snapshot,
+        message: `${source.displayName} was merged into ${target.displayName}.`,
+      });
+      return;
+    }
+
+    setUndo(null);
+    void (async () => {
+      try {
+        const result = await mergeContactsAction(source.id, target.id);
+        const error = workspaceActionError(
+          result,
+          "The relationships could not be merged.",
+        );
+        if (error) {
+          setPeople(snapshot);
+          setActionError(error);
+        }
+      } catch {
+        setPeople(snapshot);
+        setActionError(
+          "The relationships could not be merged. Check your connection and try again.",
+        );
+      }
+    })();
   }
 
   const hasFilters =
@@ -324,6 +407,14 @@ export function PeopleWorkspace({
 
   return (
     <div className="space-y-8">
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12px] text-danger"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <PageHeader
         eyebrow="Relationship workspace"
         title="People and companies"

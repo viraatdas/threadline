@@ -9,12 +9,14 @@ import type { AnalysisJobInput, AnalysisResultInput } from "../../lib/domain/sch
 import type { WorkerConfig } from "./config";
 import { WorkerError } from "./errors";
 import type { CodexExecutable } from "./executable";
-import { buildClassificationPrompt } from "./prompt";
+import { buildClassificationPrompt, buildDraftOutreachPrompt } from "./prompt";
 import {
   assertNoInjectedInstructions,
+  classificationWorkerAnalysisResultSchema,
+  draftWorkerAnalysisResultSchema,
   parseClassificationOutput,
+  parseDraftOutreachOutput,
   workerAnalysisEnvelopeSchema,
-  workerAnalysisResultSchema,
 } from "./schema";
 import type { WorkerAnalysisEnvelope } from "./types";
 
@@ -37,7 +39,7 @@ function safeChildEnvironment(config: WorkerConfig, runtimeHome: string): NodeJS
   return environment;
 }
 
-function codexArgs(config: WorkerConfig, outputPath: string): string[] {
+function codexArgs(config: WorkerConfig, schemaPath: string, outputPath: string): string[] {
   return [
     "exec",
     "--strict-config",
@@ -52,7 +54,7 @@ function codexArgs(config: WorkerConfig, outputPath: string): string[] {
     "--ignore-user-config",
     "--ignore-rules",
     "--output-schema",
-    config.CODEX_OUTPUT_SCHEMA_PATH,
+    schemaPath,
     "--output-last-message",
     outputPath,
     "--color",
@@ -107,6 +109,7 @@ export class CodexCliAnalysisRunner implements AnalysisRunner {
       if ((authStat.mode & 0o077) !== 0) throw new Error("auth.json permissions are too broad");
       await access(authPath, fsConstants.R_OK | fsConstants.W_OK);
       await access(this.config.CODEX_OUTPUT_SCHEMA_PATH, fsConstants.R_OK);
+      await access(this.config.CODEX_DRAFT_OUTPUT_SCHEMA_PATH, fsConstants.R_OK);
 
       const runtimeHome = join(tmpdir(), "threadline-codex-health-home");
       await mkdir(runtimeHome, { recursive: true, mode: 0o700 });
@@ -160,7 +163,12 @@ export class CodexCliAnalysisRunner implements AnalysisRunner {
     const envelope = workerAnalysisEnvelopeSchema.parse(
       job.payload.$threadlineWorker,
     ) as WorkerAnalysisEnvelope;
-    const prompt = buildClassificationPrompt(job, envelope.context, {
+    const isDraft = job.jobType === "draft_outreach";
+    if (isDraft && job.entity.type !== "outreach_plan") {
+      throw new WorkerError("job_unsupported", "Draft outreach jobs must target an outreach plan.");
+    }
+    const promptBuilder = isDraft ? buildDraftOutreachPrompt : buildClassificationPrompt;
+    const prompt = promptBuilder(job, envelope.context, {
       maxInputBytes: this.config.WORKER_MAX_INPUT_BYTES,
       maxMessages: this.config.WORKER_MAX_MESSAGES,
       maxMessageBytes: this.config.WORKER_MAX_MESSAGE_BYTES,
@@ -169,14 +177,17 @@ export class CodexCliAnalysisRunner implements AnalysisRunner {
     await ensureEmptyControlledDirectory(this.config.CODEX_WORKDIR);
     const executionDirectory = await mkdtemp(join(tmpdir(), "threadline-codex-run-"));
     const runtimeHome = join(executionDirectory, "home");
-    const outputPath = join(executionDirectory, "classification.json");
+    const outputPath = join(executionDirectory, isDraft ? "draft.json" : "classification.json");
+    const outputSchemaPath = isDraft
+      ? this.config.CODEX_DRAFT_OUTPUT_SCHEMA_PATH
+      : this.config.CODEX_OUTPUT_SCHEMA_PATH;
     await mkdir(runtimeHome, { recursive: true, mode: 0o700 });
 
     try {
       const execution = await this.executable.execute(
         {
           command: this.config.CODEX_COMMAND,
-          args: codexArgs(this.config, outputPath),
+          args: codexArgs(this.config, outputSchemaPath, outputPath),
           cwd: this.config.CODEX_WORKDIR,
           environment: safeChildEnvironment(this.config, runtimeHome),
           stdin: prompt,
@@ -208,25 +219,30 @@ export class CodexCliAnalysisRunner implements AnalysisRunner {
         });
       }
 
-      const classification = parseClassificationOutput(decoded);
-      assertNoInjectedInstructions(classification);
       const allowedEvidenceIds = new Set(envelope.context.messages.map((message) => message.id));
-      if (classification.evidenceMessageIds.some((messageId) => !allowedEvidenceIds.has(messageId))) {
+      const output = isDraft
+        ? parseDraftOutreachOutput(decoded)
+        : parseClassificationOutput(decoded);
+      assertNoInjectedInstructions(output);
+      if (output.evidenceMessageIds.some((messageId) => !allowedEvidenceIds.has(messageId))) {
         throw new WorkerError(
           "invalid_model_output",
           "Codex output referenced evidence outside the supplied message set.",
         );
       }
 
-      return workerAnalysisResultSchema.parse({
+      const result = {
         jobId: envelope.jobId,
         entity: job.entity,
-        resultType: "outreach_classification",
+        resultType: isDraft ? "outreach_draft" : "outreach_classification",
         schemaVersion: job.schemaVersion,
-        result: classification,
+        result: output,
         evidence: envelope.context.evidence,
-        confidence: classification.confidence,
-      });
+        confidence: output.confidence,
+      };
+      return isDraft
+        ? draftWorkerAnalysisResultSchema.parse(result)
+        : classificationWorkerAnalysisResultSchema.parse(result);
     } catch (error) {
       if (error instanceof WorkerError) throw error;
       throw new WorkerError("invalid_model_output", "Codex output failed strict validation.", {

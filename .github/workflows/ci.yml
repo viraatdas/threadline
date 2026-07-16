@@ -1,0 +1,44 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: threadline
+          POSTGRES_PASSWORD: threadline
+          POSTGRES_DB: threadline_test
+        ports:
+          - 65432:5432
+        options: >-
+          --health-cmd "pg_isready -U threadline -d threadline_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://threadline:threadline@127.0.0.1:65432/threadline_test
+      TEST_DATABASE_URL: postgres://threadline:threadline@127.0.0.1:65432/threadline_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:migrate
+      - run: pnpm check

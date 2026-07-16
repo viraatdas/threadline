@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const config = getWorkerConfig();
   const abortController = new AbortController();
   const health = new WorkerHealth(systemWorkerClock.now());
-  const store = new PostgresAnalysisJobStore(config.DATABASE_URL);
+  const store = new PostgresAnalysisJobStore(config.DATABASE_URL, config.WORKER_MAX_MESSAGES);
   const runner = new CodexCliAnalysisRunner(config, new NodeCodexExecutable());
   const worker = new CodexWorker(
     config,

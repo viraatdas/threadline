@@ -2,7 +2,7 @@ import { analysisJobInputSchema, type AnalysisResultInput, type ManualOverride }
 
 import type { WorkerConfig } from "../../worker/codex/config";
 import { preserveManualOverrides } from "../../worker/codex/normalization";
-import { workerAnalysisResultSchema } from "../../worker/codex/schema";
+import { classificationWorkerAnalysisResultSchema } from "../../worker/codex/schema";
 import type {
   AnalysisContext,
   AnalysisJobStore,
@@ -27,6 +27,7 @@ export function workerConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfi
     CODEX_HOME: "/tmp/threadline-test-codex-home",
     CODEX_WORKDIR: "/tmp/threadline-test-codex-workdir",
     CODEX_OUTPUT_SCHEMA_PATH: `${process.cwd()}/worker/codex/classification-output.schema.json`,
+    CODEX_DRAFT_OUTPUT_SCHEMA_PATH: `${process.cwd()}/worker/codex/draft-outreach-output.schema.json`,
     CODEX_TIMEOUT_MS: 5_000,
     WORKER_POLL_INTERVAL_MS: 5,
     WORKER_MAX_ATTEMPTS: 1,
@@ -124,7 +125,7 @@ export class InMemoryAnalysisJobStore implements AnalysisJobStore {
     if (this.status !== "running" || job.attemptCount !== this.attemptCount) {
       throw new Error("stale job lease");
     }
-    const parsed = workerAnalysisResultSchema.parse(result);
+    const parsed = classificationWorkerAnalysisResultSchema.parse(result);
     const stagedConversation = preserveManualOverrides(
       structuredClone(this.conversation),
       {

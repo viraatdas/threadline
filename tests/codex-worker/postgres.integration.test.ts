@@ -1,5 +1,7 @@
-import { readFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -18,23 +20,29 @@ import {
 } from "./helpers";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+if (process.env.CI && !databaseUrl) {
+  throw new Error("TEST_DATABASE_URL is required in CI.");
+}
 const describeDatabase = databaseUrl ? describe : describe.skip;
 const CONTACT_ID = "55555555-5555-4555-8555-555555555555";
 const INTEGRATION_ID = "66666666-6666-4666-8666-666666666666";
+const PLAN_ID = "77777777-7777-4777-8777-777777777777";
+const DRAFT_OUTPUT = {
+  text: "Hi Jordan, thanks for getting back to me. Would Tuesday afternoon work for a quick chat?",
+  confidence: 0.91,
+  evidenceMessageIds: ["44444444-4444-4444-8444-444444444444"],
+};
 
 describeDatabase("Postgres analysis job store", () => {
   const sql = postgres(databaseUrl!, { prepare: false, transform: postgres.camel });
   const temporaryPaths = new Set<string>();
 
   beforeAll(async () => {
-    const existing = await sql<{ tableName: string | null }[]>`
-      select to_regclass('public.analysis_jobs')::text as table_name
-    `;
-    if (!existing[0]?.tableName) {
-      const migration = await readFile("migrations/0000_even_quicksilver.sql", "utf8");
-      for (const statement of migration.split("--> statement-breakpoint")) {
-        if (statement.trim()) await sql.unsafe(statement);
-      }
+    const migrationSql = postgres(databaseUrl!, { max: 1, prepare: false });
+    try {
+      await migrate(drizzle(migrationSql), { migrationsFolder: "migrations" });
+    } finally {
+      await migrationSql.end();
     }
   });
 
@@ -110,6 +118,108 @@ describeDatabase("Postgres analysis job store", () => {
     await store.close();
   });
 
+  it("loads bounded recent contact context and atomically persists an outreach draft", async () => {
+    await replaceWithDraftJob(sql);
+    const store = new PostgresAnalysisJobStore(databaseUrl!, 1);
+    const { executable, worker } = createWorker(store, [{ output: DRAFT_OUTPUT }], temporaryPaths);
+
+    await expect(worker.runOne(new AbortController().signal)).resolves.toBe("processed");
+
+    const jobs = await sql<{ status: string; attemptCount: number }[]>`
+      select status, attempt_count from analysis_jobs where id = ${JOB_ID}
+    `;
+    const results = await sql<
+      { resultType: string; result: typeof DRAFT_OUTPUT; evidenceMessageIds: string[] }[]
+    >`
+      select result_type, result, evidence_message_ids
+      from analysis_results
+      where job_id = ${JOB_ID}
+    `;
+    const plans = await sql<{ suggestedDraft: string | null }[]>`
+      select suggested_draft from outreach_plans where id = ${PLAN_ID}
+    `;
+    const prompt = executable.requests[0]?.stdin ?? "";
+
+    expect(jobs[0]).toEqual({ status: "succeeded", attemptCount: 1 });
+    expect(results[0]).toMatchObject({
+      resultType: "outreach_draft",
+      result: DRAFT_OUTPUT,
+      evidenceMessageIds: DRAFT_OUTPUT.evidenceMessageIds,
+    });
+    expect(plans[0]?.suggestedDraft).toBe(DRAFT_OUTPUT.text);
+    expect(prompt).toContain("Book a short follow-up conversation");
+    expect(prompt).toContain("Manually Reviewed Jordan");
+    expect(prompt).toContain("Yes, please send times.");
+    expect(prompt).not.toContain("Hi Jordan, are you open to discussing Threadline?");
+    await store.close();
+  });
+
+  it("stores the draft result without replacing an explicitly overridden plan draft", async () => {
+    await replaceWithDraftJob(sql, true);
+    const store = new PostgresAnalysisJobStore(databaseUrl!);
+    const { worker } = createWorker(store, [{ output: DRAFT_OUTPUT }], temporaryPaths);
+
+    await expect(worker.runOne(new AbortController().signal)).resolves.toBe("processed");
+
+    const plans = await sql<{ suggestedDraft: string | null }[]>`
+      select suggested_draft from outreach_plans where id = ${PLAN_ID}
+    `;
+    const results = await sql<{ count: number }[]>`
+      select count(*)::int as count
+      from analysis_results
+      where job_id = ${JOB_ID} and result_type = 'outreach_draft'
+    `;
+    const jobs = await sql<{ status: string }[]>`
+      select status from analysis_jobs where id = ${JOB_ID}
+    `;
+
+    expect(plans[0]?.suggestedDraft).toBe("Owner-written draft");
+    expect(results[0]?.count).toBe(1);
+    expect(jobs[0]?.status).toBe("succeeded");
+    await store.close();
+  });
+
+  it("rolls back the draft result and plan text when atomic job completion fails", async () => {
+    await replaceWithDraftJob(sql);
+    await sql.unsafe(`
+      create or replace function fail_draft_success_for_test() returns trigger as $$
+      begin
+        if new.status = 'succeeded' then
+          raise exception 'forced draft success failure';
+        end if;
+        return new;
+      end;
+      $$ language plpgsql;
+      create trigger fail_draft_success_for_test
+      before update on analysis_jobs
+      for each row execute function fail_draft_success_for_test();
+    `);
+
+    const store = new PostgresAnalysisJobStore(databaseUrl!);
+    try {
+      const { worker } = createWorker(store, [{ output: DRAFT_OUTPUT }], temporaryPaths);
+      await expect(worker.runOne(new AbortController().signal)).resolves.toBe("failed");
+
+      const plans = await sql<{ suggestedDraft: string | null }[]>`
+        select suggested_draft from outreach_plans where id = ${PLAN_ID}
+      `;
+      const results = await sql<{ count: number }[]>`
+        select count(*)::int as count from analysis_results where job_id = ${JOB_ID}
+      `;
+      const jobs = await sql<{ status: string; errorCode: string | null }[]>`
+        select status, error_code from analysis_jobs where id = ${JOB_ID}
+      `;
+
+      expect(plans[0]?.suggestedDraft).toBeNull();
+      expect(results[0]?.count).toBe(0);
+      expect(jobs[0]).toEqual({ status: "failed", errorCode: "dead_letter:worker_internal" });
+    } finally {
+      await store.close();
+      await sql.unsafe("drop trigger if exists fail_draft_success_for_test on analysis_jobs");
+      await sql.unsafe("drop function if exists fail_draft_success_for_test()");
+    }
+  });
+
   it("rolls back result and normalized rows when the final job update fails", async () => {
     await sql.unsafe(`
       create or replace function fail_analysis_success_for_test() returns trigger as $$
@@ -159,9 +269,11 @@ function createWorker(
   const workdir = `/tmp/threadline-postgres-worker-${crypto.randomUUID()}`;
   temporaryPaths.add(workdir);
   const config = workerConfig({ CODEX_WORKDIR: workdir });
-  const runner = new CodexCliAnalysisRunner(config, new FakeCodexExecutable(responses));
+  const executable = new FakeCodexExecutable(responses);
+  const runner = new CodexCliAnalysisRunner(config, executable);
   const clock = new FixedClock();
   return {
+    executable,
     worker: new CodexWorker(
       config,
       store,
@@ -171,6 +283,55 @@ function createWorker(
       new WorkerHealth(clock.now()),
     ),
   };
+}
+
+async function replaceWithDraftJob(
+  sql: ReturnType<typeof postgres>,
+  manualDraft = false,
+): Promise<void> {
+  const manualOverrides = manualDraft
+    ? [
+        {
+          field: "suggestedDraft",
+          value: "Owner-written draft",
+          reason: "Written directly by the owner.",
+          overriddenAt: "2026-07-15T18:09:00.000Z",
+          overriddenBy: "owner@example.com",
+        },
+      ]
+    : [];
+  await sql`delete from analysis_jobs where id = ${JOB_ID}`;
+  await sql`
+    insert into outreach_plans (
+      id, contact_id, status, objective, preferred_channels, next_touch_at,
+      suggested_draft, has_manual_override, manual_overrides
+    ) values (
+      ${PLAN_ID}, ${CONTACT_ID}, 'planned', 'Book a short follow-up conversation',
+      array['gmail']::channel[], '2026-07-17T20:00:00.000Z',
+      ${manualDraft ? "Owner-written draft" : null}, ${manualDraft}, ${sql.json(manualOverrides)}
+    )
+  `;
+  const payload = {
+    planId: PLAN_ID,
+    contactId: CONTACT_ID,
+    companyId: null,
+    objective: "Book a short follow-up conversation",
+    preferredChannels: ["gmail"],
+    nextTouchAt: "2026-07-17T20:00:00.000Z",
+    requestedBy: "owner@example.com",
+    requestReason: "plan_saved",
+  };
+  await sql`
+    insert into analysis_jobs (
+      id, idempotency_key, job_type, status, entity_type, entity_id, input_hash,
+      runner, model, schema_version, payload, scheduled_at
+    ) values (
+      ${JOB_ID}, 'analysis:outreach-plan:77777777', 'draft_outreach', 'queued',
+      'outreach_plan', ${PLAN_ID}, '0123456789abcdef0123456789abcdef',
+      'codex-cli', 'gpt-5.6-luna', 1, ${sql.json(payload)},
+      '2026-07-15T18:00:00.000Z'
+    )
+  `;
 }
 
 async function seedAnalysisJob(sql: ReturnType<typeof postgres>): Promise<void> {

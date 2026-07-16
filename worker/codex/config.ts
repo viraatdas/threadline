@@ -14,6 +14,11 @@ const workerEnvironmentSchema = z.object({
     .trim()
     .min(1)
     .default(resolve(process.cwd(), "worker/codex/classification-output.schema.json")),
+  CODEX_DRAFT_OUTPUT_SCHEMA_PATH: z
+    .string()
+    .trim()
+    .min(1)
+    .default(resolve(process.cwd(), "worker/codex/draft-outreach-output.schema.json")),
   CODEX_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(2_000),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),

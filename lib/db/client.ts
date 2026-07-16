@@ -12,6 +12,11 @@ function createConnection(databaseUrl: string) {
     idle_timeout: 20,
     connect_timeout: 10,
     prepare: false,
+    connection: {
+      application_name: "threadline-web",
+      statement_timeout: 15_000,
+      idle_in_transaction_session_timeout: 15_000,
+    },
   });
 
   return {

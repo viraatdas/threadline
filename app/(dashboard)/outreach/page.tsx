@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
 
-import { workspaceData } from "@/components/people";
-import type { OutreachFilters } from "@/components/people";
-import { OutreachWorkspace } from "@/components/outreach";
+import type { OutreachFilters } from "@/components/people/types";
+import { OutreachWorkspace } from "@/components/outreach/outreach-workspace";
+import { loadOutreachWorkspaceData } from "@/lib/db/workspace";
 import { CHANNEL_VALUES } from "@/lib/domain/constants";
+
+import {
+  completeOutreachPlan,
+  rescheduleOutreachPlan,
+  retryOutreachDraft,
+} from "../workspace-actions";
 
 export const metadata: Metadata = {
   title: "Outreach",
@@ -37,10 +43,22 @@ export default async function OutreachPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+  const demo = first(params.demo) === "1";
+  const data =
+    demo
+      ? (await import("@/components/people/sample-data")).workspaceData
+      : await loadOutreachWorkspaceData();
   return (
     <OutreachWorkspace
-      data={workspaceData}
+      data={data}
       initialFilters={parseFilters(params)}
+      {...(demo
+        ? {}
+        : {
+            completePlanAction: completeOutreachPlan,
+            reschedulePlanAction: rescheduleOutreachPlan,
+            retryDraftAction: retryOutreachDraft,
+          })}
     />
   );
 }
