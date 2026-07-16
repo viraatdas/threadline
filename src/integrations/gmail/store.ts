@@ -467,6 +467,18 @@ export class PostgresGmailStore implements GmailSyncStore {
           if (!contactId) continue;
           contactIds.add(contactId);
           const messageReply = replyForMessage(message, candidate.messages);
+          const kind =
+            message.direction === "inbound" &&
+            hasEarlierOutbound(message, candidate.messages)
+              ? ("reply" as const)
+              : ("message" as const);
+          const replyState =
+            message.direction === "outbound"
+              ? messageReply
+                ? ("replied" as const)
+                : ("awaiting_reply" as const)
+              : ("replied" as const);
+          const summary = (message.bodyText ?? message.snippet)?.slice(0, 500);
           await transaction
             .insert(touchpoints)
             .values({
@@ -482,27 +494,32 @@ export class PostgresGmailStore implements GmailSyncStore {
               ),
               channel: "gmail",
               direction: message.direction,
-              kind:
-                message.direction === "inbound" &&
-                hasEarlierOutbound(message, candidate.messages)
-                  ? "reply"
-                  : "message",
-              replyState:
-                message.direction === "outbound"
-                  ? messageReply
-                    ? "replied"
-                    : "awaiting_reply"
-                  : "replied",
+              kind,
+              replyState,
               happenedAt: new Date(message.sentAt),
               isAutomated: true,
-              summary: (message.bodyText ?? message.snippet)?.slice(0, 500),
+              summary,
               metadata: {},
               sourceExternalId: message.externalMessageId,
               sourceCollectedAt: new Date(message.provenance.collectedAt),
               sourceConfidence: message.provenance.confidence,
               sourceProvenance: [message.provenance],
             })
-            .onConflictDoNothing({ target: touchpoints.idempotencyKey });
+            .onConflictDoUpdate({
+              target: touchpoints.idempotencyKey,
+              set: {
+                conversationId: conversation.id,
+                messageId: messageRow.id,
+                direction: message.direction,
+                kind,
+                replyState,
+                happenedAt: new Date(message.sentAt),
+                summary,
+                sourceCollectedAt: new Date(message.provenance.collectedAt),
+                sourceProvenance: [message.provenance],
+                updatedAt: now,
+              },
+            });
         }
       }
 

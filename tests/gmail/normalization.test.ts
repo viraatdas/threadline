@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { GmailConnector } from "@/src/integrations/gmail/connector";
+import { normalizeGmailThread } from "@/src/integrations/gmail/normalize";
 import { FixtureGmailApi, gmailAccount } from "@/tests/gmail/fakes";
 
 describe("Gmail thread normalization", () => {
@@ -63,5 +64,52 @@ describe("Gmail thread normalization", () => {
     const missingBody = pages[1]?.conversations[0]?.messages[0];
     expect(missingBody?.bodyText).toBeUndefined();
     expect(missingBody?.snippet).toBe("Following up from the conference");
+  });
+
+  it("recognizes inbound delivery aliases as owner identities", () => {
+    const conversation = normalizeGmailThread({
+      thread: {
+        id: "thread-inbound-alias",
+        messages: [
+          {
+            id: "message-inbound-alias",
+            threadId: "thread-inbound-alias",
+            labelIds: ["INBOX"],
+            internalDate: "1784152800000",
+            payload: {
+              mimeType: "text/plain",
+              headers: [
+                { name: "From", value: "Ada <ada@analytical.example>" },
+                { name: "To", value: "Support <support@example.com>" },
+                { name: "Delivered-To", value: "support@example.com" },
+                { name: "Subject", value: "Product question" },
+              ],
+              body: {
+                data: Buffer.from("Could Threadline help our team?").toString(
+                  "base64url",
+                ),
+              },
+            },
+          },
+        ],
+      },
+      integrationAccountId: gmailAccount.id,
+      ownerEmail: gmailAccount.accountEmail,
+      collectedAt: new Date("2026-07-15T18:00:00.000Z"),
+    });
+
+    expect(conversation?.messages[0]?.direction).toBe("inbound");
+    expect(
+      conversation?.participants.find(
+        (participant) =>
+          participant.externalParticipantId === "support@example.com",
+      )?.role,
+    ).toBe("owner");
+    expect(
+      conversation?.participants.find(
+        (participant) =>
+          participant.externalParticipantId === "ada@analytical.example",
+      )?.role,
+    ).toBe("contact");
   });
 });

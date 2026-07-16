@@ -82,3 +82,11 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
 - **Interfaces:** src/integrations/gmail/normalize.ts owner alias discovery; src/integrations/gmail/store.ts idempotent touchpoint reply-state updates; tests/gmail/normalization.test.ts synthetic inbound-alias fixture coverage; existing owner-only Gmail connect/callback/disconnect/status/sync APIs remain unchanged
 - **By:** followup · 2026-07-16T07:07:47.303Z
 
+## worker: Implemented unified read-only Gmail, LinkedIn, and X synchronization with
+- **Did:** Implemented unified read-only Gmail, LinkedIn, and X synchronization with owner-authenticated manual sync, secret-authenticated scheduled sync, per-account enablement, bounded concurrency, retry/timeout policy, durable Postgres run leases, cursor checkpointing, channel-isolated outcomes, transactional exact-email identity reconciliation, relationship metric recomputation, and semantic exactly-once analysis coverage. Added focused sync tests and verified all requested repository checks.
+- **Interfaces:** src/sync exports UnifiedSyncOrchestrator, PostgresSyncCoordinatorStore, PostgresSyncReconciler, runUnifiedSync, channel executors, retry/checkpoint/auth helpers, and sync request/result types; app/api/sync POST is the owner-authenticated manual entrypoint; app/api/cron/sync GET/POST is the CRON_SECRET-authenticated scheduled entrypoint; tests/sync/vitest.config.ts runs the focused sync suite.
+- **Follow-ups:**
+  - Provision scheduled sync secret and cadence [out of lane] — Production must set CRON_SECRET and configure a scheduler to call /api/cron/sync.
+  - Run live credential smoke sync [out of lane] — Gmail OAuth, Linked API credentials, X cookies, Postgres, encryption settings, and the Codex worker must be provisioned before a real production cross-channel sync can be exercised.
+- **By:** worker · 2026-07-16T08:43:21.443Z
+
