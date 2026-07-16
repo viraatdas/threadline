@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ThreadlineOutreachClassification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "isCustomerOutreach",
+    "person",
+    "company",
+    "role",
+    "relationshipStage",
+    "reply",
+    "sentiment",
+    "intent",
+    "nextAction",
+    "rationale",
+    "confidence",
+    "evidenceMessageIds"
+  ],
+  "properties": {
+    "isCustomerOutreach": { "type": "boolean" },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "givenName", "familyName", "email", "linkedinUrl", "xHandle"],
+      "properties": {
+        "displayName": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
+        "givenName": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 },
+        "familyName": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 },
+        "email": { "type": ["string", "null"], "format": "email" },
+        "linkedinUrl": { "type": ["string", "null"], "format": "uri" },
+        "xHandle": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 }
+      }
+    },
+    "company": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "domain"],
+      "properties": {
+        "name": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
+        "domain": {
+          "type": ["string", "null"],
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "seniority"],
+      "properties": {
+        "title": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
+        "seniority": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "relationshipStage": {
+      "type": "string",
+      "enum": ["unreviewed", "planned", "active", "waiting", "replied", "dormant", "closed"]
+    },
+    "reply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detected", "state", "latestReplyAt"],
+      "properties": {
+        "detected": { "type": "boolean" },
+        "state": { "type": "string", "enum": ["unknown", "awaiting_reply", "replied", "not_applicable"] },
+        "latestReplyAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative", "mixed", "unknown"] },
+    "intent": {
+      "type": "string",
+      "enum": ["prospecting", "partnership", "support", "hiring", "investor", "networking", "other", "unknown"]
+    },
+    "nextAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recommendation", "followUpAt", "summary"],
+      "properties": {
+        "recommendation": {
+          "type": "string",
+          "enum": ["follow_up", "wait_for_reply", "respond", "research", "schedule_meeting", "close_loop", "none"]
+        },
+        "followUpAt": { "type": ["string", "null"], "format": "date-time" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 800 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "evidenceMessageIds": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "format": "uuid" }
+    }
+  }
+}

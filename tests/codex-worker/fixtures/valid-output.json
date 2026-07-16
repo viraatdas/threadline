@@ -1,0 +1,38 @@
+{
+  "isCustomerOutreach": true,
+  "person": {
+    "displayName": "Jordan Lee",
+    "givenName": "Jordan",
+    "familyName": "Lee",
+    "email": "jordan@example.com",
+    "linkedinUrl": "https://www.linkedin.com/in/jordan-lee",
+    "xHandle": "jordanlee"
+  },
+  "company": {
+    "name": "Example Labs",
+    "domain": "example.com"
+  },
+  "role": {
+    "title": "VP of Sales",
+    "seniority": "VP"
+  },
+  "relationshipStage": "replied",
+  "reply": {
+    "detected": true,
+    "state": "replied",
+    "latestReplyAt": "2026-07-15T18:05:00.000Z"
+  },
+  "sentiment": "positive",
+  "intent": "prospecting",
+  "nextAction": {
+    "recommendation": "respond",
+    "followUpAt": null,
+    "summary": "Reply with the requested availability."
+  },
+  "rationale": "The owner initiated a sales conversation and the contact responded positively.",
+  "confidence": 0.94,
+  "evidenceMessageIds": [
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444"
+  ]
+}
