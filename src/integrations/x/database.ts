@@ -789,6 +789,7 @@ export async function runDatabaseXSync(options: {
   }
   const credentials = await openXCredentials(account);
   const owner = accountIdentity(account);
+  const since = options.since ?? account.lastSyncedAt ?? undefined;
   const repositories = createRepositories(options.database);
   const cursorBefore = await repositories.integrations.getCursor(
     account.id,
@@ -825,7 +826,7 @@ export async function runDatabaseXSync(options: {
       integrationAccountId: account.id,
       now,
       ...(options.limit ? { limit: options.limit } : {}),
-      ...(options.since ? { since: options.since } : {}),
+      ...(since ? { since } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     });
     const cursorAfter = await repositories.integrations.getCursor(

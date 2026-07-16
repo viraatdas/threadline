@@ -50,7 +50,7 @@ Threadline deploys as three private pieces: Postgres, the Vercel Next.js app, an
 6. Follow `infra/fly/README.md` to deploy exactly one private worker with a persistent `/data` volume, `CODEX_HOME=/data/codex`, `CODEX_MODEL=gpt-5.6-luna`, and the owner's file-backed ChatGPT-managed Codex login. Do not configure an OpenAI API key.
 7. Install Linked API and X credentials through their secure operator flows so encrypted values land in the production credential store without passing through source control.
 
-Vercel cron calls `/api/cron/sync` with `CRON_SECRET`; owner-triggered sync uses `/api/sync`. Both paths use the same channel-isolated, lease-protected orchestration and never invoke a provider mutation.
+Vercel cron calls `/api/cron/sync` daily at `15:00 UTC` with `CRON_SECRET`; owner-triggered sync uses `/api/sync`. Both paths use the same channel-isolated, lease-protected orchestration and never invoke a provider mutation. X resumes from the account's last successful sync unless an explicit `since` cutoff is supplied for a backfill.
 
 ## Release verification
 
