@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# local environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# deployment and tooling
+.vercel/
+.impeccable/live/
+*.tsbuildinfo
+next-env.d.ts
+
+# logs and OS files
+*.log
+.DS_Store
+
+# local databases and exports
+*.db
+*.sqlite
+*.sqlite3
+data/
+exports/
