@@ -109,29 +109,45 @@ export async function POST(request: Request) {
         updatedAt: new Date(),
       })
       .where(eq(syncRuns.id, started.run.id));
+    const completedAt = new Date();
     await database
       .update(integrationAccounts)
       .set({
-        status: "attention_required",
-        lastErrorAt: new Date(),
-        lastErrorCode: "linkedin_sync_failed",
-        lastErrorMessage: "LinkedIn sync failed.",
-        updatedAt: new Date(),
+        status: stats.failed > 0 ? "attention_required" : "connected",
+        lastSyncedAt: completedAt,
+        lastErrorAt: stats.failed > 0 ? completedAt : null,
+        lastErrorCode: stats.failed > 0 ? "linkedin_ingestion_partial" : null,
+        lastErrorMessage:
+          stats.failed > 0
+            ? "One or more LinkedIn conversations failed ingestion."
+            : null,
+        updatedAt: completedAt,
       })
       .where(eq(integrationAccounts.id, account.id));
     return NextResponse.json({ runId: started.run.id, status, ...stats });
   } catch (error) {
+    const failedAt = new Date();
     await database
       .update(syncRuns)
       .set({
         status: "failed",
-        completedAt: new Date(),
+        completedAt: failedAt,
         failedCount: 1,
         errorCode: "linkedin_sync_failed",
         errorMessage: error instanceof Error ? error.message : "LinkedIn sync failed.",
-        updatedAt: new Date(),
+        updatedAt: failedAt,
       })
       .where(eq(syncRuns.id, started.run.id));
+    await database
+      .update(integrationAccounts)
+      .set({
+        status: "attention_required",
+        lastErrorAt: failedAt,
+        lastErrorCode: "linkedin_sync_failed",
+        lastErrorMessage: "LinkedIn sync failed.",
+        updatedAt: failedAt,
+      })
+      .where(eq(integrationAccounts.id, account.id));
     return NextResponse.json({ error: "LinkedIn sync failed.", runId: started.run.id }, { status: 502 });
   }
 }

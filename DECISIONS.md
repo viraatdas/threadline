@@ -90,3 +90,7 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
   - Run live credential smoke sync [out of lane] — Gmail OAuth, Linked API credentials, X cookies, Postgres, encryption settings, and the Codex worker must be provisioned before a real production cross-channel sync can be exercised.
 - **By:** worker · 2026-07-16T08:43:21.443Z
 
+## Main release hardening
+- **What:** The referenced `tmvwsssmurlk` hardening change was an empty sibling, so the terminal hardening pass was completed directly on `main`: real navigation targets, owner-only source settings, aggregate integration tests, authenticated Playwright release coverage, production deployment/security documentation, and the LinkedIn sync status correction.
+- **Why:** Preserve the already-merged Gmail recovery and unified-sync ancestry while ensuring every intended hardening behavior exists in the pushed production candidate without manufacturing an empty merge.
+- **By:** main release · 2026-07-16

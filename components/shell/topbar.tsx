@@ -19,15 +19,14 @@ export function Topbar({ ownerEmail, ownerName }: TopbarProps) {
         <BrandMark />
       </div>
 
-      <button
-        type="button"
+      <Link
+        href="/people"
         className="hidden h-9 w-full max-w-[380px] items-center gap-2 rounded-[7px] border border-line bg-surface-raised px-3 text-left text-[13px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:flex"
-        aria-label="Open command search"
+        aria-label="Search people and companies"
       >
         <Search className="size-4" strokeWidth={1.8} aria-hidden="true" />
-        Search people, companies, or threads
-        <kbd className="ml-auto text-[11px] text-ink-faint">⌘K</kbd>
-      </button>
+        Search people and companies
+      </Link>
 
       <div className="flex items-center gap-2.5">
         <div className="hidden text-right sm:block">
