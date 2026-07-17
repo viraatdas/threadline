@@ -1,4 +1,4 @@
-import type { Channel } from "@/lib/domain/constants";
+import type { Channel, RelationshipStage } from "@/lib/domain/constants";
 
 export interface WorkspaceActionFailure {
   ok: false;
@@ -69,6 +69,11 @@ export type MergeContactsAction = (
   sourceContactId: string,
   targetContactId: string,
 ) => Promise<WorkspaceActionResult<MergeContactsReceipt>>;
+
+export type MoveRelationshipStageAction = (
+  contactId: string,
+  stage: RelationshipStage,
+) => Promise<WorkspaceActionResult<ContactMutationReceipt>>;
 
 export type EditCompanyAction = (
   companyId: string,

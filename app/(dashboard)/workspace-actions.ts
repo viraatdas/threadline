@@ -30,7 +30,7 @@ import {
   outreachPlans,
   touchpoints,
 } from "@/lib/db/schema";
-import { channelSchema } from "@/lib/domain/schemas";
+import { channelSchema, relationshipStageSchema } from "@/lib/domain/schemas";
 import type { ManualOverride, SourceProvenance } from "@/lib/domain/schemas";
 import { createIdempotencyKey, hashContent } from "@/lib/security/idempotency";
 
@@ -700,6 +700,69 @@ export async function mergeContacts(
     };
   } catch (error) {
     return mutationFailure(error, "The relationships could not be merged safely.");
+  }
+}
+
+export async function moveRelationshipStage(
+  contactIdInput: string,
+  stageInput: string,
+): Promise<WorkspaceActionResult<ContactMutationReceipt>> {
+  const session = await requireOwner();
+  const contactId = uuidSchema.safeParse(contactIdInput);
+  const stage = relationshipStageSchema.safeParse(stageInput);
+  if (!contactId.success) return { ok: false, error: "The relationship ID is invalid." };
+  if (!stage.success) return { ok: false, error: "That relationship stage is not recognized." };
+  const actorEmail = actorFromSession(session);
+  const occurredAt = new Date();
+
+  try {
+    const companyId = await getDatabase().transaction(async (transaction) => {
+      const [current] = await transaction
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, contactId.data))
+        .limit(1);
+      if (!current) throw new WorkspaceMutationError("The relationship no longer exists.");
+      if (current.relationshipStage === stage.data) return current.companyId;
+
+      const reason = `Moved from ${current.relationshipStage} to ${stage.data} on the board.`;
+      await transaction
+        .update(contacts)
+        .set({
+          relationshipStage: stage.data,
+          hasManualOverride: true,
+          manuallyOverriddenAt: occurredAt,
+          manualOverrides: prependOverrides(
+            current.manualOverrides,
+            [{ field: "relationshipStage", value: stage.data, reason }],
+            actorEmail,
+            occurredAt,
+          ),
+          updatedAt: occurredAt,
+        })
+        .where(eq(contacts.id, contactId.data));
+      await transaction.insert(auditEvents).values({
+        action: "contact.stage_changed",
+        outcome: "success",
+        actorEmail,
+        entityType: "contact",
+        entityId: contactId.data,
+        metadata: {
+          from: current.relationshipStage,
+          to: stage.data,
+          reason,
+        },
+        occurredAt,
+      });
+      return current.companyId;
+    });
+    revalidateContact(contactId.data, companyId);
+    return {
+      ok: true,
+      data: { contactId: contactId.data, actorEmail, occurredAt: occurredAt.toISOString() },
+    };
+  } catch (error) {
+    return mutationFailure(error, "The relationship stage could not be updated.");
   }
 }
 

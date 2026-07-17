@@ -1,6 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PeopleWorkspace, workspaceData } from "@/components/people";
 
@@ -44,6 +44,48 @@ describe("people and company workspace", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Company cards")).toBeInTheDocument();
+  });
+
+  it("moves a relationship across the board and persists through the stage action", async () => {
+    const user = userEvent.setup();
+    const ana = workspaceData.people.find(
+      (person) => person.displayName === "Ana Torres",
+    );
+    expect(ana?.relationshipStage).toBe("planned");
+    const moveStageAction = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        contactId: ana?.id ?? "",
+        actorEmail: "owner@threadline.local",
+        occurredAt: new Date().toISOString(),
+      },
+    }));
+
+    render(
+      <PeopleWorkspace
+        data={workspaceData}
+        initialFilters={filters}
+        moveStageAction={moveStageAction}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    expect(window.location.search).toContain("view=board");
+    expect(
+      screen.getByRole("heading", { name: /relationships by stage/ }),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Move Ana Torres to a stage" }),
+      "active",
+    );
+
+    await waitFor(() =>
+      expect(moveStageAction).toHaveBeenCalledWith(ana?.id, "active"),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Move Ana Torres to a stage" }),
+    ).toHaveValue("active");
   });
 
   it("adds and merges manual relationships with a reversible local mutation", async () => {

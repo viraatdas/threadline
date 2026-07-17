@@ -5,7 +5,11 @@ import type { PeopleFilters } from "@/components/people/types";
 import { loadPeopleListWorkspaceData } from "@/lib/db/workspace";
 import { CHANNEL_VALUES, REPLY_STATE_VALUES } from "@/lib/domain/constants";
 
-import { addContact, mergeContacts } from "../workspace-actions";
+import {
+  addContact,
+  mergeContacts,
+  moveRelationshipStage,
+} from "../workspace-actions";
 
 export const metadata: Metadata = {
   title: "People",
@@ -27,7 +31,12 @@ function parseFilters(params: Awaited<SearchParams>): PeopleFilters {
 
   return {
     query: first(params.q) ?? "",
-    view: view === "companies" ? "companies" : "people",
+    view:
+      view === "companies"
+        ? "companies"
+        : view === "board"
+          ? "board"
+          : "people",
     reply:
       reply &&
       REPLY_STATE_VALUES.includes(reply as (typeof REPLY_STATE_VALUES)[number])
@@ -69,6 +78,7 @@ export default async function PeoplePage({
         : {
             addContactAction: addContact,
             mergeContactsAction: mergeContacts,
+            moveStageAction: moveRelationshipStage,
           })}
     />
   );

@@ -25,6 +25,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from "@/components/people/modal";
+import { PeopleBoard, stageLabel } from "@/components/people/people-board";
 import { ReplyBadge } from "@/components/people/status-badge";
 import type {
   CompanyRecord,
@@ -34,9 +35,11 @@ import type {
 } from "@/components/people/types";
 import { UndoNotice } from "@/components/people/undo-notice";
 import { PageHeader } from "@/components/shell";
+import type { RelationshipStage } from "@/lib/domain/constants";
 import type {
   AddContactAction,
   MergeContactsAction,
+  MoveRelationshipStageAction,
 } from "@/components/workspace-actions";
 import { workspaceActionError } from "@/components/workspace-actions";
 
@@ -46,6 +49,7 @@ interface PeopleWorkspaceProps {
   initialMergeSourceId?: string;
   addContactAction?: AddContactAction;
   mergeContactsAction?: MergeContactsAction;
+  moveStageAction?: MoveRelationshipStageAction;
 }
 
 interface UndoState {
@@ -198,6 +202,7 @@ export function PeopleWorkspace({
   initialMergeSourceId,
   addContactAction,
   mergeContactsAction,
+  moveStageAction,
 }: PeopleWorkspaceProps) {
   const [people, setPeople] = useState(data.people);
   const [filters, setFilters] = useState(initialFilters);
@@ -397,6 +402,60 @@ export function PeopleWorkspace({
     })();
   }
 
+  function handleMoveStage(person: PersonRecord, stage: RelationshipStage) {
+    if (person.relationshipStage === stage) return;
+    const snapshot = people;
+    setActionError(null);
+    const now = new Date().toISOString();
+    const updated: PersonRecord = {
+      ...person,
+      relationshipStage: stage,
+      hasManualOverride: true,
+      audit: [
+        {
+          id: `stage-${person.id}-${Date.now()}`,
+          occurredAt: now,
+          actor: "owner@threadline.local",
+          action: "Relationship stage changed",
+          detail: `Moved to ${stageLabel(stage)}.`,
+          outcome: "success",
+        },
+        ...person.audit,
+      ],
+    };
+    setPeople((current) =>
+      current.map((item) => (item.id === person.id ? updated : item)),
+    );
+
+    if (!moveStageAction) {
+      setUndo({
+        people: snapshot,
+        message: `${person.displayName} moved to ${stageLabel(stage)}.`,
+      });
+      return;
+    }
+
+    setUndo(null);
+    void (async () => {
+      try {
+        const result = await moveStageAction(person.id, stage);
+        const error = workspaceActionError(
+          result,
+          "The relationship stage could not be updated.",
+        );
+        if (error) {
+          setPeople(snapshot);
+          setActionError(error);
+        }
+      } catch {
+        setPeople(snapshot);
+        setActionError(
+          "The relationship stage could not be updated. Check your connection and try again.",
+        );
+      }
+    })();
+  }
+
   const hasFilters =
     filters.query !== "" ||
     filters.reply !== "all" ||
@@ -441,7 +500,7 @@ export function PeopleWorkspace({
             className="inline-flex w-fit rounded-[8px] border border-line bg-surface-subtle p-1"
             aria-label="Relationship view"
           >
-            {(["people", "companies"] as const).map((view) => (
+            {(["people", "board", "companies"] as const).map((view) => (
               <button
                 key={view}
                 type="button"
@@ -455,7 +514,9 @@ export function PeopleWorkspace({
               >
                 {view === "people"
                   ? `People · ${people.length}`
-                  : `Companies · ${data.companies.length}`}
+                  : view === "board"
+                    ? "Board"
+                    : `Companies · ${data.companies.length}`}
               </button>
             ))}
           </div>
@@ -472,9 +533,9 @@ export function PeopleWorkspace({
               value={filters.query}
               onChange={(event) => updateFilters({ query: event.target.value })}
               placeholder={
-                filters.view === "people"
-                  ? "Search name, company, role, or email"
-                  : "Search company, industry, or domain"
+                filters.view === "companies"
+                  ? "Search company, industry, or domain"
+                  : "Search name, company, role, or email"
               }
               className={`${controlClass} pl-9`}
             />
@@ -558,7 +619,14 @@ export function PeopleWorkspace({
         </div>
       </section>
 
-      {filters.view === "people" ? (
+      {filters.view === "board" ? (
+        <PeopleBoard
+          people={visiblePeople}
+          companies={data.companies}
+          generatedAt={data.generatedAt}
+          {...(moveStageAction ? { onMoveStage: handleMoveStage } : {})}
+        />
+      ) : filters.view === "people" ? (
         visiblePeople.length ? (
           <section aria-labelledby="people-results-heading">
             <div className="mb-3 flex items-baseline justify-between gap-4">

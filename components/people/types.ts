@@ -148,7 +148,7 @@ export interface PeopleWorkspaceData {
 
 export interface PeopleFilters {
   query: string;
-  view: "people" | "companies";
+  view: "people" | "companies" | "board";
   reply: "all" | ReplyState;
   channel: "all" | Channel;
   confidence: "all" | "review" | "confirmed";
