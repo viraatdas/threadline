@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ContactRound, ListTodo, Settings2, Waypoints } from "lucide-react";
+import { ContactRound, LayoutGrid, ListTodo, Settings2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { label: "Overview", href: "/", icon: Waypoints },
+  { label: "Board", href: "/", icon: LayoutGrid },
   { label: "People", href: "/people", icon: ContactRound },
   { label: "Outreach", href: "/outreach", icon: ListTodo },
   { label: "Settings", href: "/settings", icon: Settings2 },

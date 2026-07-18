@@ -3,16 +3,16 @@
 import Link from "next/link";
 import {
   ContactRound,
+  LayoutGrid,
   ListTodo,
   Settings2,
-  Waypoints,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import { BrandMark } from "@/components/shell/brand-mark";
 
 const navigation = [
-  { label: "Overview", href: "/", icon: Waypoints },
+  { label: "Board", href: "/", icon: LayoutGrid },
   { label: "People", href: "/people", icon: ContactRound },
   { label: "Outreach", href: "/outreach", icon: ListTodo },
 ] as const;
