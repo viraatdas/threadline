@@ -5,8 +5,8 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "crons": [
     {
-      "path": "/api/cron/sync?gmailBackfillDays=3650&gmailForceBackfill=1&channels=gmail",
-      "schedule": "59 3 * * *"
+      "path": "/api/cron/sync",
+      "schedule": "0 15 * * *"
     }
   ]
 }
