@@ -109,6 +109,12 @@ export async function runGmailSync(
     });
     return { ...counts, mode, cursor: cursorAfter, runId: run.id };
   } catch (error) {
+    // Temporary: surface the raw stack (no message content) to locate a
+    // runtime type error during backfill. Remove once diagnosed.
+    console.error(
+      "[gmail-sync-stack]",
+      error instanceof Error ? (error.stack ?? error.message) : String(error),
+    );
     const normalized = normalizeGmailError(error);
     if (normalized instanceof GmailAuthorizationError) {
       await input.store.markAttentionRequired(
