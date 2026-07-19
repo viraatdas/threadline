@@ -408,10 +408,20 @@ async function recomputeRelationships(
       touchCount: sql<number>`count(*)::int`,
       inboundTouchCount: sql<number>`count(*) filter (where ${touchpoints.direction} = 'inbound')::int`,
       outboundTouchCount: sql<number>`count(*) filter (where ${touchpoints.direction} = 'outbound')::int`,
-      firstTouchAt: sql<Date | null>`min(${touchpoints.happenedAt})`,
-      lastTouchAt: sql<Date | null>`max(${touchpoints.happenedAt})`,
-      lastInboundAt: sql<Date | null>`max(${touchpoints.happenedAt}) filter (where ${touchpoints.direction} = 'inbound')`,
-      lastOutboundAt: sql<Date | null>`max(${touchpoints.happenedAt}) filter (where ${touchpoints.direction} = 'outbound')`,
+      firstTouchAt: sql`min(${touchpoints.happenedAt})`.mapWith(
+        touchpoints.happenedAt,
+      ),
+      lastTouchAt: sql`max(${touchpoints.happenedAt})`.mapWith(
+        touchpoints.happenedAt,
+      ),
+      lastInboundAt:
+        sql`max(${touchpoints.happenedAt}) filter (where ${touchpoints.direction} = 'inbound')`.mapWith(
+          touchpoints.happenedAt,
+        ),
+      lastOutboundAt:
+        sql`max(${touchpoints.happenedAt}) filter (where ${touchpoints.direction} = 'outbound')`.mapWith(
+          touchpoints.happenedAt,
+        ),
     })
     .from(touchpoints)
     .where(inArray(touchpoints.contactId, [...contactIds]))

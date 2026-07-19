@@ -47,7 +47,7 @@ describe("unified sync route status reporting", () => {
         expect.objectContaining({
           maxConcurrency: 3,
           maxAttempts: 2,
-          timeoutMs: 120_000,
+          timeoutMs: 270_000,
         }),
       );
     await expect(response.json()).resolves.toMatchObject({
