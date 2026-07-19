@@ -36,6 +36,7 @@ export interface ChannelSyncContext {
   limit?: number;
   since?: Date;
   gmailBackfillDays?: number;
+  gmailForceBackfill?: boolean;
   signal: AbortSignal;
 }
 
@@ -126,6 +127,7 @@ export interface UnifiedSyncRequest {
   limit?: number;
   since?: Date;
   gmailBackfillDays?: number;
+  gmailForceBackfill?: boolean;
   maxConcurrency?: number;
   maxAttempts?: number;
   timeoutMs?: number;

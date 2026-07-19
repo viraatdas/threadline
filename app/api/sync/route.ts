@@ -40,14 +40,16 @@ export async function POST(request: Request) {
     signal: request.signal,
     maxConcurrency: 3,
     maxAttempts: 2,
-    timeoutMs: 120_000,
+    timeoutMs: 270_000,
     ...(channels ? { channels } : {}),
     ...(parsed.data.limit ? { limit: parsed.data.limit } : {}),
     ...(parsed.data.since ? { since: new Date(parsed.data.since) } : {}),
     ...(parsed.data.gmailBackfillDays
       ? { gmailBackfillDays: parsed.data.gmailBackfillDays }
       : {}),
+    ...(parsed.data.gmailForceBackfill ? { gmailForceBackfill: true } : {}),
   });
   const ok = summary.status !== "failed";
+  console.log(`[threadline-sync] manual ${JSON.stringify(summary)}`);
   return NextResponse.json({ ok, summary }, { status: ok ? 200 : 502 });
 }

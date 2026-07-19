@@ -127,6 +127,9 @@ export class UnifiedSyncOrchestrator {
             ...(request.gmailBackfillDays
               ? { gmailBackfillDays: request.gmailBackfillDays }
               : {}),
+            ...(request.gmailForceBackfill
+              ? { gmailForceBackfill: true }
+              : {}),
           }),
       });
       const result = executed.value;

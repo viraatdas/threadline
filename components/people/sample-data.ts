@@ -362,7 +362,7 @@ const marcusTimeline = [
   ),
 ];
 
-export const people: PersonRecord[] = [
+const rawPeople: Omit<PersonRecord, "recentMessages">[] = [
   {
     id: ids.people.maya,
     displayName: "Maya Chen",
@@ -833,6 +833,21 @@ export const people: PersonRecord[] = [
     ],
   },
 ];
+
+export const people: PersonRecord[] = rawPeople.map((person) => ({
+  ...person,
+  recentMessages: person.timeline
+    .filter((item) => item.kind === "message" || item.kind === "reply")
+    .slice(0, 3)
+    .map((item) => ({
+      id: item.id,
+      subject: item.title,
+      snippet: item.summary,
+      at: item.happenedAt,
+      direction: item.direction,
+      channel: item.channel,
+    })),
+}));
 
 export const companies: CompanyRecord[] = [
   {

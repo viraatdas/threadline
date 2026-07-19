@@ -7,6 +7,7 @@ export const unifiedSyncInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   since: z.string().datetime({ offset: true }).optional(),
   gmailBackfillDays: z.number().int().min(1).max(3650).optional(),
+  gmailForceBackfill: z.boolean().optional(),
 });
 
 export function normalizeRequestedChannels(

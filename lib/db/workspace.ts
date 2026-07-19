@@ -546,6 +546,17 @@ export function mapPeopleWorkspaceData(
       const timeline = (touchpointsByContact.get(contact.id) ?? [])
         .map(mapTimeline)
         .sort((left, right) => right.happenedAt.localeCompare(left.happenedAt));
+      const recentMessages = timeline
+        .filter((item) => item.kind === "message" || item.kind === "reply")
+        .slice(0, 3)
+        .map((item) => ({
+          id: item.id,
+          subject: item.title,
+          snippet: item.summary,
+          at: item.happenedAt,
+          direction: item.direction,
+          channel: item.channel,
+        }));
       const companyOverrides = company?.manualOverrides ?? [];
       const companyProvenance = company?.sourceProvenance ?? [];
 
@@ -606,6 +617,7 @@ export function mapPeopleWorkspaceData(
         hasManualOverride: contact.hasManualOverride,
         identities,
         timeline,
+        recentMessages,
         audit: auditByEntity.get(`contact:${contact.id}`) ?? [],
         sourceProvenance: serializeProvenance(
           contact.sourceProvenance,

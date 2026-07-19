@@ -29,6 +29,7 @@ export async function syncConnectedGmailAccount(input: {
   account?: GmailIntegrationAccountRecord;
   trigger?: "manual" | "scheduled" | "webhook" | "backfill";
   backfillDays?: number;
+  forceBackfill?: boolean;
   signal?: AbortSignal;
 }) {
   const store = createGmailStore();
@@ -59,6 +60,7 @@ export async function syncConnectedGmailAccount(input: {
     ...(input.backfillDays !== undefined
       ? { backfillDays: input.backfillDays }
       : {}),
+    ...(input.forceBackfill ? { forceBackfill: true } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
 }

@@ -219,6 +219,43 @@ export function PeopleBoard({
                           </span>
                         </div>
 
+                        {person.recentMessages.length > 0 ? (
+                          <ul className="mt-2 space-y-1.5 border-t border-line pt-2">
+                            {person.recentMessages
+                              .slice(0, 2)
+                              .map((message) => (
+                                <li key={message.id} className="min-w-0">
+                                  <div className="flex items-baseline justify-between gap-2">
+                                    <span className="flex min-w-0 items-baseline gap-1">
+                                      <span
+                                        aria-hidden="true"
+                                        className="shrink-0 text-ink-faint"
+                                      >
+                                        {message.direction === "outbound"
+                                          ? "↑"
+                                          : message.direction === "inbound"
+                                            ? "↓"
+                                            : "•"}
+                                      </span>
+                                      <span className="truncate text-[11px] font-medium text-ink">
+                                        {message.subject}
+                                      </span>
+                                    </span>
+                                    <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
+                                      {formatRelativeDate(
+                                        message.at,
+                                        generatedAt,
+                                      )}
+                                    </span>
+                                  </div>
+                                  <p className="truncate text-[11px] leading-4 text-ink-faint">
+                                    {message.snippet}
+                                  </p>
+                                </li>
+                              ))}
+                          </ul>
+                        ) : null}
+
                         {canMove ? (
                           <label className="mt-2 block">
                             <span className="sr-only">

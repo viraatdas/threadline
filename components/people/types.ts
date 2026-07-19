@@ -53,6 +53,15 @@ export interface TimelineItem {
   provenance: EvidenceView;
 }
 
+export interface RecentMessage {
+  id: string;
+  subject: string;
+  snippet: string;
+  at: string;
+  direction: "inbound" | "outbound" | "internal";
+  channel: TimelineChannel;
+}
+
 export interface AuditEntryView {
   id: string;
   occurredAt: string;
@@ -93,6 +102,7 @@ export interface PersonRecord {
   hasManualOverride: Contact["hasManualOverride"];
   identities: ChannelIdentityView[];
   timeline: TimelineItem[];
+  recentMessages: RecentMessage[];
   audit: AuditEntryView[];
   sourceProvenance: SourceProvenance[];
 }

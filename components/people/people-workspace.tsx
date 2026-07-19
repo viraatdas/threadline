@@ -151,6 +151,7 @@ function makeManualPerson(formData: FormData): PersonRecord {
     hasManualOverride: true,
     identities: [],
     timeline: [],
+    recentMessages: [],
     audit: [
       {
         id: `${id}-audit`,

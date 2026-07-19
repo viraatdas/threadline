@@ -25,6 +25,7 @@ interface RunGmailSyncInput {
   ownerEmail: string;
   trigger?: "manual" | "scheduled" | "webhook" | "backfill";
   backfillDays?: number;
+  forceBackfill?: boolean;
   now?: Date;
   signal?: AbortSignal;
 }
@@ -37,11 +38,15 @@ export async function runGmailSync(
   const backfillDays = clampBackfillDays(
     input.backfillDays ?? metadataBackfillDays(input.account.metadata),
   );
-  const cursorBefore = await input.store.getCursor(input.account);
+  const storedCursor = await input.store.getCursor(input.account);
+  // A forced backfill ignores the stored history cursor so the connector
+  // re-pulls the full `backfillDays` window instead of only incremental
+  // History API changes. The fresh cursor is still saved afterwards.
+  const cursorBefore = input.forceBackfill ? null : storedCursor;
   const runKey = createIdempotencyKey(
     "gmail-sync",
     input.account.id,
-    cursorBefore?.historyId ?? "initial",
+    cursorBefore?.historyId ?? (input.forceBackfill ? "force-backfill" : "initial"),
     trigger,
     backfillDays,
   );

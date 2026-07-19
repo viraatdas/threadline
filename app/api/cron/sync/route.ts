@@ -29,9 +29,20 @@ async function handleScheduledSync(request: Request, body: unknown) {
     ?.split(",")
     .map((channel) => channel.trim())
     .filter(Boolean);
+  const queryBackfillDaysRaw = url.searchParams.get("gmailBackfillDays");
+  const queryBackfillDays = queryBackfillDaysRaw
+    ? Number.parseInt(queryBackfillDaysRaw, 10)
+    : undefined;
+  const queryForceBackfill = ["1", "true", "yes"].includes(
+    (url.searchParams.get("gmailForceBackfill") ?? "").toLowerCase(),
+  );
   const parsed = unifiedSyncInputSchema.safeParse({
     ...(typeof body === "object" && body !== null ? body : {}),
     ...(queryChannels?.length ? { channels: queryChannels } : {}),
+    ...(queryBackfillDays !== undefined && Number.isFinite(queryBackfillDays)
+      ? { gmailBackfillDays: queryBackfillDays }
+      : {}),
+    ...(queryForceBackfill ? { gmailForceBackfill: true } : {}),
   });
   if (!parsed.success) {
     return NextResponse.json(
@@ -55,14 +66,17 @@ async function handleScheduledSync(request: Request, body: unknown) {
     signal: request.signal,
     maxConcurrency: 3,
     maxAttempts: 2,
-    timeoutMs: 120_000,
+    timeoutMs: 270_000,
     ...(channels ? { channels } : {}),
     ...(parsed.data.limit ? { limit: parsed.data.limit } : {}),
     ...(parsed.data.since ? { since: new Date(parsed.data.since) } : {}),
     ...(parsed.data.gmailBackfillDays
       ? { gmailBackfillDays: parsed.data.gmailBackfillDays }
       : {}),
+    ...(parsed.data.gmailForceBackfill ? { gmailForceBackfill: true } : {}),
   });
   const ok = summary.status !== "failed";
+  // Counts/status only — never message content. Lets operators verify a run.
+  console.log(`[threadline-sync] scheduled ${JSON.stringify(summary)}`);
   return NextResponse.json({ ok, summary }, { status: ok ? 200 : 502 });
 }

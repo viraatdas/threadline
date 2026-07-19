@@ -62,6 +62,7 @@ class GmailSyncExecutor implements SyncChannelExecutor {
       ...(context.gmailBackfillDays !== undefined
         ? { backfillDays: context.gmailBackfillDays }
         : {}),
+      ...(context.gmailForceBackfill ? { forceBackfill: true } : {}),
       signal: context.signal,
     });
     return {
