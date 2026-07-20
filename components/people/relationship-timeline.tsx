@@ -9,7 +9,11 @@ import {
   StickyNote,
 } from "lucide-react";
 
-import { channelLabel, formatDateTime } from "@/components/people/formatters";
+import {
+  channelLabel,
+  emailParties,
+  formatDateTime,
+} from "@/components/people/formatters";
 import { EvidenceBadge, ReplyBadge } from "@/components/people/status-badge";
 import type { TimelineItem } from "@/components/people/types";
 
@@ -22,7 +26,15 @@ function TimelineIcon({ item }: { item: TimelineItem }) {
   return MessageCircle;
 }
 
-export function RelationshipTimeline({ items }: { items: TimelineItem[] }) {
+export function RelationshipTimeline({
+  items,
+  counterpartName,
+  counterpartEmail,
+}: {
+  items: TimelineItem[];
+  counterpartName?: string;
+  counterpartEmail?: string | null;
+}) {
   const orderedItems = items.toSorted(
     (left, right) =>
       new Date(right.happenedAt).getTime() -
@@ -91,7 +103,22 @@ export function RelationshipTimeline({ items }: { items: TimelineItem[] }) {
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-ink-muted">
+              {(item.kind === "message" || item.kind === "reply") &&
+              counterpartName ? (
+                <p className="mt-1 text-[11px] leading-4 text-ink-faint">
+                  {(() => {
+                    const parties = emailParties(
+                      item.direction,
+                      counterpartName,
+                      counterpartEmail ?? null,
+                    );
+                    return parties.to
+                      ? `${parties.from} → ${parties.to}`
+                      : parties.from;
+                  })()}
+                </p>
+              ) : null}
+              <p className="mt-1.5 max-w-2xl text-[13px] leading-5 whitespace-pre-line text-ink-muted">
                 {item.summary}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">

@@ -478,7 +478,7 @@ export class PostgresGmailStore implements GmailSyncStore {
                 ? ("replied" as const)
                 : ("awaiting_reply" as const)
               : ("replied" as const);
-          const summary = (message.bodyText ?? message.snippet)?.slice(0, 500);
+          const summary = (message.bodyText ?? message.snippet)?.slice(0, 2000);
           await transaction
             .insert(touchpoints)
             .values({

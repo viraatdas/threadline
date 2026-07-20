@@ -559,7 +559,11 @@ export function PersonDetail({
                 planned follow-ups.
               </p>
             </div>
-            <RelationshipTimeline items={person.timeline} />
+            <RelationshipTimeline
+              items={person.timeline}
+              counterpartName={person.displayName}
+              counterpartEmail={person.primaryEmail}
+            />
           </section>
         </div>
 

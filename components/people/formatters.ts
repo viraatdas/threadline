@@ -71,3 +71,28 @@ export function initials(displayName: string) {
     .map((part) => part.at(0)?.toUpperCase())
     .join("");
 }
+
+// Heuristic: is this address an automated / bulk sender rather than a person?
+export function isNoiseEmail(email: string | null | undefined): boolean {
+  if (!email) return false; // manual contacts with no email are kept
+  const [local = "", domain = ""] = email.toLowerCase().split("@");
+  const localNoise =
+    /(^|[.\-_+])(no-?reply|do-?not-?reply|donotreply|noreply|notifications?|notify|mailer-daemon|postmaster|bounces?|newsletters?|updates?|digest|alerts?|mailer|automated?|marketing)($|[.\-_+])/;
+  // Bulk-email subdomains only match at the START of the domain (so a real
+  // domain like "acme.io" is never misread as noise).
+  const domainNoise =
+    /^(?:em|e|mail|mailer|news|newsletter|reply|notifications?|notify|marketing|bounce)\.|(?:mailchimp|sendgrid|sparkpost|amazonses|mailgun|postmark|substack|sendinblue|mandrill|customer\.io)/;
+  return localNoise.test(local) || domainNoise.test(domain);
+}
+
+// Derive from/to for a message from its direction and the related person.
+export function emailParties(
+  direction: "inbound" | "outbound" | "internal",
+  personName: string,
+  personEmail: string | null,
+): { from: string; to: string } {
+  const contact = personEmail ? `${personName} <${personEmail}>` : personName;
+  if (direction === "outbound") return { from: "You", to: contact };
+  if (direction === "inbound") return { from: contact, to: "You" };
+  return { from: contact, to: "" };
+}

@@ -5,7 +5,12 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ChannelMark } from "@/components/people/channel-mark";
-import { formatRelativeDate, initials } from "@/components/people/formatters";
+import {
+  emailParties,
+  formatRelativeDate,
+  initials,
+  isNoiseEmail,
+} from "@/components/people/formatters";
 import { ReplyBadge } from "@/components/people/status-badge";
 import type {
   CompanyRecord,
@@ -58,12 +63,20 @@ export function PeopleBoard({
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
     null,
   );
+  const [hideNoise, setHideNoise] = useState(true);
   const canMove = Boolean(onMoveStage);
+
+  const noiseCount = people.filter((person) =>
+    isNoiseEmail(person.primaryEmail),
+  ).length;
+  const shownPeople = hideNoise
+    ? people.filter((person) => !isNoiseEmail(person.primaryEmail))
+    : people;
 
   const grouped = new Map<RelationshipStage, PersonRecord[]>(
     STAGE_COLUMNS.map((column) => [column.stage, [] as PersonRecord[]]),
   );
-  for (const person of people) {
+  for (const person of shownPeople) {
     const bucket = grouped.get(person.relationshipStage);
     if (bucket) bucket.push(person);
     else grouped.set(person.relationshipStage, [person]);
@@ -77,18 +90,34 @@ export function PeopleBoard({
 
   return (
     <section aria-labelledby="board-results-heading" className="space-y-3">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2
           id="board-results-heading"
           className="text-[14px] font-semibold text-ink"
         >
-          {people.length} relationships by stage
+          {shownPeople.length} relationships by stage
         </h2>
-        <p className="text-[11px] text-ink-faint">
-          {canMove
-            ? "Drag a card between columns, or use its stage menu, to update the pipeline"
-            : "Read-only preview of the relationship pipeline"}
-        </p>
+        <div className="flex items-center gap-3">
+          {noiseCount > 0 ? (
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-muted">
+              <input
+                type="checkbox"
+                checked={hideNoise}
+                onChange={(event) => setHideNoise(event.target.checked)}
+                className="size-3.5 accent-accent"
+              />
+              Real people only
+              <span className="text-ink-faint">
+                ({noiseCount} hidden)
+              </span>
+            </label>
+          ) : null}
+          <p className="hidden text-[11px] text-ink-faint sm:block">
+            {canMove
+              ? "Drag a card between columns to update the pipeline"
+              : "Read-only preview"}
+          </p>
+        </div>
       </div>
 
       <div className="-mx-1 overflow-x-auto pb-2">
@@ -219,41 +248,59 @@ export function PeopleBoard({
                           </span>
                         </div>
 
-                        {person.recentMessages.length > 0 ? (
-                          <ul className="mt-2 space-y-1.5 border-t border-line pt-2">
-                            {person.recentMessages
-                              .slice(0, 2)
-                              .map((message) => (
-                                <li key={message.id} className="min-w-0">
-                                  <div className="flex items-baseline justify-between gap-2">
-                                    <span className="flex min-w-0 items-baseline gap-1">
-                                      <span
-                                        aria-hidden="true"
-                                        className="shrink-0 text-ink-faint"
-                                      >
-                                        {message.direction === "outbound"
-                                          ? "↑"
-                                          : message.direction === "inbound"
-                                            ? "↓"
-                                            : "•"}
-                                      </span>
-                                      <span className="truncate text-[11px] font-medium text-ink">
-                                        {message.subject}
-                                      </span>
-                                    </span>
-                                    <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
-                                      {formatRelativeDate(
-                                        message.at,
-                                        generatedAt,
-                                      )}
-                                    </span>
-                                  </div>
-                                  <p className="truncate text-[11px] leading-4 text-ink-faint">
-                                    {message.snippet}
-                                  </p>
-                                </li>
-                              ))}
-                          </ul>
+                        {person.recentMessages[0] ? (
+                          <div className="mt-2 rounded-[6px] border border-line bg-surface-subtle p-2">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="flex min-w-0 items-baseline gap-1">
+                                <span
+                                  aria-hidden="true"
+                                  className="shrink-0 text-ink-faint"
+                                >
+                                  {person.recentMessages[0].direction ===
+                                  "outbound"
+                                    ? "↑"
+                                    : person.recentMessages[0].direction ===
+                                        "inbound"
+                                      ? "↓"
+                                      : "•"}
+                                </span>
+                                <span className="truncate text-[11px] font-semibold text-ink">
+                                  {person.recentMessages[0].subject}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
+                                {formatRelativeDate(
+                                  person.recentMessages[0].at,
+                                  generatedAt,
+                                )}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 truncate text-[10px] text-ink-faint">
+                              {person.recentMessages[0].direction === "outbound"
+                                ? `to ${
+                                    emailParties(
+                                      "outbound",
+                                      person.displayName,
+                                      person.primaryEmail,
+                                    ).to
+                                  }`
+                                : `from ${
+                                    emailParties(
+                                      person.recentMessages[0].direction,
+                                      person.displayName,
+                                      person.primaryEmail,
+                                    ).from
+                                  }`}
+                            </p>
+                            <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-ink-muted">
+                              {person.recentMessages[0].snippet}
+                            </p>
+                            {person.recentMessages.length > 1 ? (
+                              <p className="mt-1 text-[10px] text-ink-faint">
+                                +{person.recentMessages.length - 1} earlier
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
 
                         {canMove ? (
