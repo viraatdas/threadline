@@ -139,6 +139,36 @@ describe("Gmail synchronization", () => {
     expect(store.cursor?.historyId).toBe("100");
   });
 
+  it("treats a forced re-run of a completed backfill as a no-op", async () => {
+    const api = new FixtureGmailApi();
+    const store = new MemoryGmailStore();
+    const now = new Date("2026-07-15T18:00:00.000Z");
+    store.backfillState = {
+      oldestCoveredAt: new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      targetSince: new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      pendingHistoryId: "100",
+      done: true,
+      updatedAt: now.toISOString(),
+    };
+
+    const result = await runGmailSync({
+      account: gmailAccount,
+      api,
+      store,
+      ownerEmail: gmailAccount.accountEmail,
+      trigger: "backfill",
+      forceBackfill: true,
+      backfillDays: 45,
+      now,
+    });
+
+    // Nothing re-fetched, no double counting, and it reports finished.
+    expect(api.calls.threads).toHaveLength(0);
+    expect(result.discoveredCount).toBe(0);
+    expect(result.backfillPending).toBe(false);
+    expect(result.mode).toBe("initial");
+  });
+
   it("marks revoked credentials as requiring attention without advancing the cursor", async () => {
     const api = new FixtureGmailApi();
     api.revoked = true;

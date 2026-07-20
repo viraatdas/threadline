@@ -230,12 +230,18 @@ async function runWindowedBackfill(input: {
     input.now.getTime() - input.backfillDays * DAY_MS,
   );
   const priorState = await input.store.getBackfillState(input.account);
-  // Resume the upper bound from the oldest instant already covered; otherwise
-  // start at "now". A prior state whose target is shallower than this request
-  // still resumes from its watermark and keeps going deeper.
+  // A prior run that finished at least this deep means there is nothing left to
+  // do — a forced re-run must not restart from "now".
+  const alreadyComplete = Boolean(
+    priorState?.done &&
+      new Date(priorState.targetSince).getTime() <= targetSince.getTime(),
+  );
+  // Otherwise resume the upper bound from the oldest instant already covered;
+  // start at "now" on a fresh backfill. A prior state whose target is shallower
+  // than this request still resumes from its watermark and keeps going deeper.
   const coverEnd =
+    !alreadyComplete &&
     priorState &&
-    !priorState.done &&
     new Date(priorState.oldestCoveredAt).getTime() < input.now.getTime()
       ? new Date(priorState.oldestCoveredAt)
       : input.now;
@@ -245,7 +251,7 @@ async function runWindowedBackfill(input: {
   // safe resume boundary is therefore the minimum, across processed threads, of
   // each thread's newest-message time: everything newer than that is covered.
   let watermark = coverEnd;
-  let done = coverEnd.getTime() <= targetSince.getTime();
+  let done = alreadyComplete || coverEnd.getTime() <= targetSince.getTime();
   let budgetHit = false;
 
   if (!done) {
