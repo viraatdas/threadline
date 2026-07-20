@@ -129,6 +129,21 @@ export interface GmailSyncCursor {
   updatedAt: string;
 }
 
+// Durable progress marker for a resumable, windowed history backfill. Stored on
+// the integration account so each run resumes from where the last one stopped
+// instead of restarting from the full window and timing out.
+export interface GmailBackfillState {
+  // Oldest instant already fully covered; the next window ends here (ISO).
+  oldestCoveredAt: string;
+  // How far back the backfill intends to reach (ISO).
+  targetSince: string;
+  // Snapshot of the mailbox historyId, promoted to the incremental cursor once
+  // the backfill is complete so future syncs go incremental.
+  pendingHistoryId?: string;
+  done: boolean;
+  updatedAt: string;
+}
+
 export interface GmailPersistResult {
   conversationId: string;
   changed: boolean;
@@ -172,6 +187,13 @@ export interface GmailSyncStore {
     account: GmailIntegrationAccountRecord,
     cursor: GmailSyncCursor,
   ): Promise<void>;
+  getBackfillState(
+    account: GmailIntegrationAccountRecord,
+  ): Promise<GmailBackfillState | null>;
+  saveBackfillState(
+    account: GmailIntegrationAccountRecord,
+    state: GmailBackfillState,
+  ): Promise<void>;
   completeSyncRun(input: {
     runId: string;
     status: "succeeded" | "partial" | "failed";
@@ -192,7 +214,9 @@ export interface GmailSyncStore {
 }
 
 export interface GmailSyncResult extends GmailSyncCounts {
-  mode: "initial" | "incremental" | "recovery";
+  mode: "initial" | "incremental" | "recovery" | "backfill";
   cursor: GmailSyncCursor;
   runId: string;
+  // True while a windowed backfill still has older mail left to cover.
+  backfillPending?: boolean;
 }

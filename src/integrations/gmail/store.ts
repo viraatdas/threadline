@@ -25,6 +25,7 @@ import {
   GMAIL_SCOPES,
 } from "@/src/integrations/gmail/constants";
 import type {
+  GmailBackfillState,
   GmailIntegrationAccountRecord,
   GmailPersistResult,
   GmailStoredCredentials,
@@ -590,6 +591,34 @@ export class PostgresGmailStore implements GmailSyncStore {
       lastSeenExternalId: cursor.historyId,
       lastSeenAt: new Date(cursor.updatedAt),
     });
+  }
+
+  async getBackfillState(
+    account: GmailIntegrationAccountRecord,
+  ): Promise<GmailBackfillState | null> {
+    const value = account.metadata?.gmailBackfill;
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      typeof (value as GmailBackfillState).oldestCoveredAt === "string" &&
+      typeof (value as GmailBackfillState).targetSince === "string"
+    ) {
+      return value as GmailBackfillState;
+    }
+    return null;
+  }
+
+  async saveBackfillState(
+    account: GmailIntegrationAccountRecord,
+    state: GmailBackfillState,
+  ): Promise<void> {
+    const metadata = { ...account.metadata, gmailBackfill: state };
+    // Keep the in-memory record fresh so repeated saves within one run compound.
+    account.metadata = metadata;
+    await this.database
+      .update(integrationAccounts)
+      .set({ metadata, updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, account.id));
   }
 
   async completeSyncRun(input: {

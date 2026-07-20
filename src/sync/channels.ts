@@ -74,7 +74,12 @@ class GmailSyncExecutor implements SyncChannelExecutor {
       failedCount: result.failedCount,
       analysisEnqueuedCount: result.analysisEnqueuedCount,
       childRunId: result.runId,
-      metadata: { mode: result.mode },
+      metadata: {
+        mode: result.mode,
+        ...(result.backfillPending !== undefined
+          ? { backfillPending: result.backfillPending }
+          : {}),
+      },
     };
   }
 

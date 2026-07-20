@@ -23,6 +23,9 @@ export interface PullRequest {
   resource: string;
   cursor?: string;
   since?: Date;
+  // Upper time bound for a backfill window. Lets a resumable backfill request a
+  // bounded [since, until) slice so each run finishes under the serverless cap.
+  until?: Date;
   limit?: number;
 }
 

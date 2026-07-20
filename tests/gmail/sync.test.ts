@@ -17,10 +17,12 @@ describe("Gmail synchronization", () => {
       store,
       ownerEmail: gmailAccount.accountEmail,
       trigger: "backfill",
+      backfillDays: 30,
       now: new Date("2026-07-15T18:00:00.000Z"),
     });
 
     expect(initial.mode).toBe("initial");
+    expect(initial.backfillPending).toBe(false);
     expect(initial.discoveredCount).toBe(2);
     expect(initial.analysisEnqueuedCount).toBe(2);
     expect(store.messages.size).toBe(3);
@@ -95,11 +97,46 @@ describe("Gmail synchronization", () => {
       api,
       store,
       ownerEmail: gmailAccount.accountEmail,
+      backfillDays: 30,
       now: new Date("2026-07-15T18:00:00.000Z"),
     });
     expect(result.mode).toBe("recovery");
     expect(result.cursor.historyId).toBe("120");
     expect(result.discoveredCount).toBe(2);
+  });
+
+  it("resumes a windowed backfill from its saved watermark instead of restarting", async () => {
+    const api = new FixtureGmailApi();
+    const store = new MemoryGmailStore();
+    const now = new Date("2026-07-15T18:00:00.000Z");
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // Simulate a prior run that was budget-stopped after one 30-day window,
+    // leaving a watermark. A 45-day target has one 30-day window still to cover.
+    store.backfillState = {
+      oldestCoveredAt: thirtyDaysAgo.toISOString(),
+      targetSince: new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      done: false,
+      updatedAt: thirtyDaysAgo.toISOString(),
+    };
+
+    const resumed = await runGmailSync({
+      account: gmailAccount,
+      api,
+      store,
+      ownerEmail: gmailAccount.accountEmail,
+      trigger: "scheduled",
+      backfillDays: 45,
+      now,
+    });
+
+    // Exactly one window's worth of threads fetched (2) proves it resumed from
+    // the watermark; restarting from "now" would cover both windows (4 fetches).
+    expect(api.calls.threads).toHaveLength(2);
+    expect(resumed.mode).toBe("initial");
+    expect(resumed.backfillPending).toBe(false);
+    expect(store.backfillState?.done).toBe(true);
+    expect(store.cursor?.historyId).toBe("100");
   });
 
   it("marks revoked credentials as requiring attention without advancing the cursor", async () => {

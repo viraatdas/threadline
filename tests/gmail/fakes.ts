@@ -4,6 +4,7 @@ import { createIdempotencyKey } from "@/lib/security/idempotency";
 import { GmailHistoryExpiredError } from "@/src/integrations/gmail/errors";
 import type {
   GmailApi,
+  GmailBackfillState,
   GmailHistoryPage,
   GmailIntegrationAccountRecord,
   GmailPersistResult,
@@ -176,6 +177,19 @@ export class MemoryGmailStore implements GmailSyncStore {
     counts: GmailSyncCounts;
   }): Promise<void> {
     void input;
+  }
+
+  backfillState: GmailBackfillState | null = null;
+
+  async getBackfillState(): Promise<GmailBackfillState | null> {
+    return this.backfillState;
+  }
+
+  async saveBackfillState(
+    _account: GmailIntegrationAccountRecord,
+    state: GmailBackfillState,
+  ): Promise<void> {
+    this.backfillState = state;
   }
 
   async markConnected(): Promise<void> {}

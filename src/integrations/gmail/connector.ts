@@ -80,7 +80,7 @@ export class GmailConnector implements ChannelConnector {
     ownerEmail: string,
     startingHistoryId: string,
   ): AsyncIterable<SyncPage> {
-    const query = initialQuery(request.since);
+    const query = initialQuery(request.since, request.until);
     let pageToken: string | undefined;
     do {
       const page = await this.options.api.listThreads({
@@ -195,10 +195,12 @@ export class GmailConnector implements ChannelConnector {
   }
 }
 
-function initialQuery(since: Date | undefined): string {
+function initialQuery(since: Date | undefined, until: Date | undefined): string {
   const mailboxFilter = "{in:sent in:inbox}";
-  if (!since) return mailboxFilter;
-  return `${mailboxFilter} after:${Math.floor(since.getTime() / 1000)}`;
+  const clauses = [mailboxFilter];
+  if (since) clauses.push(`after:${Math.floor(since.getTime() / 1000)}`);
+  if (until) clauses.push(`before:${Math.ceil(until.getTime() / 1000)}`);
+  return clauses.join(" ");
 }
 
 function collectChangedThreadIds(
