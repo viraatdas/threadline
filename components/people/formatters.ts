@@ -38,6 +38,91 @@ export function formatRelativeDate(value: string | null, referenceNow: string) {
   return formatDate(value);
 }
 
+// Compact past-tense distance for card-level scanning ("3h ago", "2w ago").
+// Sub-day precision matters here: "Today" hides whether a reply landed ten
+// minutes or ten hours ago.
+export function formatTimeAgo(value: string | null, referenceNow: string) {
+  if (!value) return "never";
+  const deltaMs = new Date(referenceNow).getTime() - new Date(value).getTime();
+  const minutes = Math.round(deltaMs / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 14) return `${days}d ago`;
+  const weeks = Math.round(days / 7);
+  if (weeks < 9) return `${weeks}w ago`;
+  const months = Math.round(days / 30.4);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+export interface FollowUpStatus {
+  label: string;
+  tone: "positive" | "attention" | "neutral";
+}
+
+// One human-readable line answering "where does this thread stand and how
+// long has it been?" — whose move it is drives the tone.
+export function followUpStatus(
+  person: {
+    replyState: ReplyState;
+    lastInboundAt: string | null;
+    lastOutboundAt: string | null;
+    lastTouchAt: string | null;
+  },
+  referenceNow: string,
+): FollowUpStatus {
+  const inboundAt = person.lastInboundAt
+    ? new Date(person.lastInboundAt).getTime()
+    : null;
+  const outboundAt = person.lastOutboundAt
+    ? new Date(person.lastOutboundAt).getTime()
+    : null;
+
+  if (person.replyState === "awaiting_reply" && person.lastOutboundAt) {
+    const waitingDays =
+      (new Date(referenceNow).getTime() - (outboundAt ?? 0)) /
+      (24 * 60 * 60 * 1000);
+    return {
+      label: `You followed up ${formatTimeAgo(person.lastOutboundAt, referenceNow)} · no reply yet`,
+      tone: waitingDays >= 7 ? "attention" : "neutral",
+    };
+  }
+  if (person.replyState === "replied") {
+    if (inboundAt && (!outboundAt || inboundAt > outboundAt)) {
+      return {
+        label: `They replied ${formatTimeAgo(person.lastInboundAt, referenceNow)} · your turn`,
+        tone: "positive",
+      };
+    }
+    if (person.lastOutboundAt) {
+      return {
+        label: `You replied ${formatTimeAgo(person.lastOutboundAt, referenceNow)}`,
+        tone: "neutral",
+      };
+    }
+  }
+  if (person.lastTouchAt) {
+    return {
+      label: `Last touch ${formatTimeAgo(person.lastTouchAt, referenceNow)}`,
+      tone: "neutral",
+    };
+  }
+  return { label: "No activity yet", tone: "neutral" };
+}
+
+// Deterministic pastel identity color so the same person is always the same
+// hue across views.
+export function avatarHue(displayName: string) {
+  let hash = 0;
+  for (const char of displayName) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 360;
+  }
+  return hash;
+}
+
 export function confidenceLabel(confidence: number) {
   if (confidence >= 0.9) return "High confidence";
   if (confidence >= 0.7) return "Review suggested";

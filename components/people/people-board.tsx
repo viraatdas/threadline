@@ -6,11 +6,11 @@ import { useState } from "react";
 
 import { ChannelMark } from "@/components/people/channel-mark";
 import {
-  emailParties,
-  formatRelativeDate,
+  avatarHue,
+  followUpStatus,
+  formatTimeAgo,
   initials,
 } from "@/components/people/formatters";
-import { ReplyBadge } from "@/components/people/status-badge";
 import type {
   CompanyRecord,
   PersonRecord,
@@ -191,7 +191,7 @@ export function PeopleBoard({
                           setDraggedId(null);
                           setDragOverStage(null);
                         }}
-                        className={`rounded-[8px] border border-line bg-background p-2.5 transition-shadow ${
+                        className={`rounded-[8px] border border-line bg-background p-3 transition-shadow ${
                           canMove ? "cursor-grab active:cursor-grabbing" : ""
                         } ${
                           draggedId === person.id
@@ -200,7 +200,13 @@ export function PeopleBoard({
                         }`}
                       >
                         <div className="flex items-start gap-2.5">
-                          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-subtle text-[10px] font-semibold text-ink-muted">
+                          <span
+                            className="grid size-7 shrink-0 place-items-center rounded-full text-[10px] font-semibold"
+                            style={{
+                              background: `oklch(0.94 0.045 ${avatarHue(person.displayName)})`,
+                              color: `oklch(0.42 0.09 ${avatarHue(person.displayName)})`,
+                            }}
+                          >
                             {initials(person.displayName)}
                           </span>
                           <div className="min-w-0 flex-1">
@@ -244,108 +250,119 @@ export function PeopleBoard({
                           </span>
                         </div>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <ReplyBadge state={person.replyState} />
-                          {person.identities.map((identity) => (
-                            <ChannelMark
-                              key={identity.id}
-                              channel={identity.channel}
-                            />
-                          ))}
-                        </div>
-
-                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-line pt-2 text-[11px] text-ink-faint">
-                          <span className="tabular-nums">
-                            {person.touchCount} touches
-                          </span>
-                          <span>
-                            {person.lastTouchAt
-                              ? `Last ${formatRelativeDate(
-                                  person.lastTouchAt,
-                                  generatedAt,
-                                ).toLowerCase()}`
-                              : "No activity"}
-                          </span>
-                        </div>
-
                         {person.recentMessages[0] ? (
-                          <div className="mt-2 rounded-[6px] border border-line bg-surface-subtle p-2">
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="flex min-w-0 items-baseline gap-1">
-                                <span
-                                  aria-hidden="true"
-                                  className="shrink-0 text-ink-faint"
-                                >
-                                  {person.recentMessages[0].direction ===
+                          <Link
+                            href={`/people/${person.id}`}
+                            className="mt-2.5 block rounded-[6px] bg-surface-subtle p-2 transition-colors hover:bg-accent-subtle/60 focus-visible:outline-2 focus-visible:outline-accent"
+                          >
+                            <div className="flex items-baseline gap-1.5">
+                              <span
+                                aria-hidden="true"
+                                className="shrink-0 text-[11px] text-ink-faint"
+                                title={
+                                  person.recentMessages[0].direction ===
                                   "outbound"
-                                    ? "↑"
-                                    : person.recentMessages[0].direction ===
-                                        "inbound"
-                                      ? "↓"
-                                      : "•"}
-                                </span>
-                                <span className="truncate text-[11px] font-semibold text-ink">
-                                  {person.recentMessages[0].subject}
-                                </span>
+                                    ? "You sent this"
+                                    : "They sent this"
+                                }
+                              >
+                                {person.recentMessages[0].direction ===
+                                "outbound"
+                                  ? "↑"
+                                  : person.recentMessages[0].direction ===
+                                      "inbound"
+                                    ? "↓"
+                                    : "•"}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+                                {person.recentMessages[0].subject}
                               </span>
                               <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
-                                {formatRelativeDate(
+                                {formatTimeAgo(
                                   person.recentMessages[0].at,
                                   generatedAt,
                                 )}
                               </span>
                             </div>
-                            <p className="mt-0.5 truncate text-[10px] text-ink-faint">
-                              {person.recentMessages[0].direction === "outbound"
-                                ? `to ${
-                                    emailParties(
-                                      "outbound",
-                                      person.displayName,
-                                      person.primaryEmail,
-                                    ).to
-                                  }`
-                                : `from ${
-                                    emailParties(
-                                      person.recentMessages[0].direction,
-                                      person.displayName,
-                                      person.primaryEmail,
-                                    ).from
-                                  }`}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-ink-muted">
+                            <p className="mt-1 line-clamp-2 text-[11px] leading-[1.5] text-ink-muted">
                               {person.recentMessages[0].snippet}
                             </p>
                             {person.recentMessages.length > 1 ? (
                               <p className="mt-1 text-[10px] text-ink-faint">
-                                +{person.recentMessages.length - 1} earlier
+                                +{person.recentMessages.length - 1} earlier in
+                                thread
                               </p>
                             ) : null}
-                          </div>
-                        ) : null}
+                          </Link>
+                        ) : (
+                          <p className="mt-2.5 rounded-[6px] bg-surface-subtle p-2 text-[11px] text-ink-faint">
+                            No email context yet — history is still syncing.
+                          </p>
+                        )}
 
-                        {canMove ? (
-                          <label className="mt-2 block">
-                            <span className="sr-only">
-                              Move {person.displayName} to a stage
+                        {(() => {
+                          const status = followUpStatus(person, generatedAt);
+                          return (
+                            <p className="mt-2 flex items-center gap-1.5 text-[11px]">
+                              <span
+                                aria-hidden="true"
+                                className={`size-1.5 shrink-0 rounded-full ${
+                                  status.tone === "attention"
+                                    ? "bg-warning"
+                                    : status.tone === "positive"
+                                      ? "bg-accent"
+                                      : "bg-ink-faint/60"
+                                }`}
+                              />
+                              <span
+                                className={
+                                  status.tone === "neutral"
+                                    ? "text-ink-muted"
+                                    : "font-medium text-ink"
+                                }
+                              >
+                                {status.label}
+                              </span>
+                            </p>
+                          );
+                        })()}
+
+                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-line pt-2">
+                          <span className="flex items-center gap-1.5">
+                            {person.identities.map((identity) => (
+                              <ChannelMark
+                                key={identity.id}
+                                channel={identity.channel}
+                              />
+                            ))}
+                            <span className="text-[10px] tabular-nums text-ink-faint">
+                              {person.touchCount} touches
                             </span>
-                            <select
-                              value={person.relationshipStage}
-                              onChange={(event) =>
-                                move(
-                                  person.id,
-                                  event.target.value as RelationshipStage,
-                                )
-                              }
-                              className="h-7 w-full rounded-[6px] border border-line bg-surface-subtle px-1.5 text-[11px] text-ink-muted focus-visible:outline-2 focus-visible:outline-accent"
-                            >
-                              {RELATIONSHIP_STAGE_VALUES.map((stage) => (
-                                <option key={stage} value={stage}>
-                                  Stage: {stageLabel(stage)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ) : null}
+                          </span>
+                          {canMove ? (
+                            <label className="min-w-0">
+                              <span className="sr-only">
+                                Move {person.displayName} to a stage
+                              </span>
+                              <select
+                                value={person.relationshipStage}
+                                onChange={(event) =>
+                                  move(
+                                    person.id,
+                                    event.target.value as RelationshipStage,
+                                  )
+                                }
+                                className="h-6 max-w-[120px] cursor-pointer rounded-[6px] border border-transparent bg-transparent px-1 text-[10px] text-ink-faint transition-colors hover:border-line hover:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent"
+                              >
+                                {RELATIONSHIP_STAGE_VALUES.map((stage) => (
+                                  <option key={stage} value={stage}>
+                                    Stage: {stageLabel(stage)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
+                        </div>
                       </article>
                     ))
                   )}
