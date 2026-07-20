@@ -1,0 +1,8 @@
+node_modules
+.next
+.vercel
+.git
+coverage
+playwright-report
+test-results
+tests/**/node_modules

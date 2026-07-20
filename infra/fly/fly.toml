@@ -4,7 +4,7 @@ kill_signal = "SIGTERM"
 kill_timeout = "45s"
 
 [build]
-  dockerfile = "Dockerfile.worker"
+  dockerfile = "../../Dockerfile.worker"
 
 [env]
   ANALYSIS_RUNNER = "codex-cli"
