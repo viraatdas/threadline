@@ -9,7 +9,6 @@ import {
   emailParties,
   formatRelativeDate,
   initials,
-  isNoiseEmail,
 } from "@/components/people/formatters";
 import { ReplyBadge } from "@/components/people/status-badge";
 import type {
@@ -26,13 +25,13 @@ interface StageColumn {
 }
 
 const STAGE_COLUMNS: StageColumn[] = [
-  { stage: "unreviewed", label: "Unreviewed", hint: "New from sync, not yet triaged" },
-  { stage: "planned", label: "Planned", hint: "Outreach intended, not started" },
-  { stage: "active", label: "Active", hint: "Conversation in progress" },
-  { stage: "waiting", label: "Waiting", hint: "Awaiting their reply" },
-  { stage: "replied", label: "Replied", hint: "They responded" },
+  { stage: "planned", label: "Planned", hint: "Outreach intended, not sent yet" },
+  { stage: "waiting", label: "Waiting for reply", hint: "You reached out, no reply yet" },
+  { stage: "replied", label: "Replied", hint: "They replied — active conversation" },
+  { stage: "active", label: "Active", hint: "Ongoing back-and-forth" },
   { stage: "dormant", label: "Dormant", hint: "Gone quiet, may revisit" },
-  { stage: "closed", label: "Closed", hint: "No further follow-up planned" },
+  { stage: "closed", label: "Closed", hint: "No further follow-up" },
+  { stage: "unreviewed", label: "Unreviewed", hint: "New, not yet triaged" },
 ];
 
 export function stageLabel(stage: RelationshipStage): string {
@@ -63,15 +62,20 @@ export function PeopleBoard({
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
     null,
   );
-  const [hideNoise, setHideNoise] = useState(true);
+  const [outreachOnly, setOutreachOnly] = useState(true);
   const canMove = Boolean(onMoveStage);
 
-  const noiseCount = people.filter((person) =>
-    isNoiseEmail(person.primaryEmail),
+  // A genuine conversation is one you took part in: you emailed them
+  // (outbound), they replied to you, or you added/edited them by hand.
+  // Pure inbound mail (newsletters, promos, cold inbound) is filtered out.
+  const isConversation = (person: PersonRecord) =>
+    person.outboundTouchCount > 0 ||
+    person.replyState === "replied" ||
+    person.hasManualOverride;
+  const hiddenCount = people.filter(
+    (person) => !isConversation(person),
   ).length;
-  const shownPeople = hideNoise
-    ? people.filter((person) => !isNoiseEmail(person.primaryEmail))
-    : people;
+  const shownPeople = outreachOnly ? people.filter(isConversation) : people;
 
   const grouped = new Map<RelationshipStage, PersonRecord[]>(
     STAGE_COLUMNS.map((column) => [column.stage, [] as PersonRecord[]]),
@@ -98,18 +102,16 @@ export function PeopleBoard({
           {shownPeople.length} relationships by stage
         </h2>
         <div className="flex items-center gap-3">
-          {noiseCount > 0 ? (
+          {hiddenCount > 0 ? (
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-muted">
               <input
                 type="checkbox"
-                checked={hideNoise}
-                onChange={(event) => setHideNoise(event.target.checked)}
+                checked={outreachOnly}
+                onChange={(event) => setOutreachOnly(event.target.checked)}
                 className="size-3.5 accent-accent"
               />
-              Real people only
-              <span className="text-ink-faint">
-                ({noiseCount} hidden)
-              </span>
+              My conversations only
+              <span className="text-ink-faint">({hiddenCount} inbound hidden)</span>
             </label>
           ) : null}
           <p className="hidden text-[11px] text-ink-faint sm:block">
