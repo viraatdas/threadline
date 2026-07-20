@@ -19,13 +19,14 @@ import type {
 } from "@/src/integrations/gmail/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// One backfill run walks history in bounded date windows, newest-first, saving
-// a watermark after each. Windows are small so a single one finishes quickly;
-// the soft budget stops the run well before the serverless/orchestrator cap
-// (240s) so the run returns a partial success instead of being killed mid-flight
-// — the next run (a click or the daily cron) resumes from the saved watermark.
-const BACKFILL_WINDOW_MS = 30 * DAY_MS;
-const BACKFILL_SOFT_BUDGET_MS = 150_000;
+// A backfill run walks history newest-first and saves a durable watermark after
+// EVERY page, so progress survives even on a huge mailbox. The soft budget stops
+// the run well under the orchestrator/serverless cap (240s) — checked between
+// pages so the run resolves as a partial success instead of being killed
+// mid-flight by the hard timer (which would discard the result). The next run (a
+// click or the daily cron) resumes from the saved watermark. The margin below
+// the cap must exceed the time a single page can take to fetch and persist.
+const BACKFILL_SOFT_BUDGET_MS = 120_000;
 
 interface RunGmailSyncInput {
   account: GmailIntegrationAccountRecord;
@@ -211,8 +212,8 @@ async function consumeConnector(input: {
     : null;
 }
 
-// Walks history in bounded, newest-first date windows, persisting a durable
-// watermark after each so a killed or budget-stopped run resumes cleanly.
+// Walks history newest-first in one pass, saving a durable watermark after every
+// page so a budget-stopped or killed run resumes cleanly from where it left off.
 async function runWindowedBackfill(input: {
   connector: GmailConnector;
   account: GmailIntegrationAccountRecord;
@@ -229,25 +230,25 @@ async function runWindowedBackfill(input: {
     input.now.getTime() - input.backfillDays * DAY_MS,
   );
   const priorState = await input.store.getBackfillState(input.account);
-  // Resume from the oldest instant already covered; otherwise start at "now".
-  // A prior state whose target is shallower than this request still resumes
-  // from its watermark and simply keeps going deeper.
-  let coverEnd =
-    priorState && new Date(priorState.oldestCoveredAt).getTime() < input.now.getTime()
+  // Resume the upper bound from the oldest instant already covered; otherwise
+  // start at "now". A prior state whose target is shallower than this request
+  // still resumes from its watermark and keeps going deeper.
+  const coverEnd =
+    priorState &&
+    !priorState.done &&
+    new Date(priorState.oldestCoveredAt).getTime() < input.now.getTime()
       ? new Date(priorState.oldestCoveredAt)
       : input.now;
   let pendingHistoryId = priorState?.pendingHistoryId;
+
+  // Gmail returns threads ordered by their most-recent message, descending. The
+  // safe resume boundary is therefore the minimum, across processed threads, of
+  // each thread's newest-message time: everything newer than that is covered.
+  let watermark = coverEnd;
   let done = coverEnd.getTime() <= targetSince.getTime();
+  let budgetHit = false;
 
-  while (!done && coverEnd.getTime() > targetSince.getTime()) {
-    if (input.signal?.aborted) break;
-    if (Date.now() - startedAtMs > BACKFILL_SOFT_BUDGET_MS) break;
-
-    const windowStart = new Date(
-      Math.max(targetSince.getTime(), coverEnd.getTime() - BACKFILL_WINDOW_MS),
-    );
-
-    let windowCompleted = true;
+  if (!done) {
     try {
       for await (const page of input.connector.pull(
         {
@@ -257,7 +258,7 @@ async function runWindowedBackfill(input: {
         },
         {
           resource: GMAIL_CURSOR_RESOURCE,
-          since: windowStart,
+          since: targetSince,
           until: coverEnd,
           limit: 100,
         },
@@ -265,6 +266,12 @@ async function runWindowedBackfill(input: {
         if (page.cursor && !pendingHistoryId) pendingHistoryId = page.cursor;
         for (const conversation of page.conversations) {
           input.counts.discoveredCount += 1;
+          const newestAt = conversation.messages.reduce(
+            (newest, message) => Math.max(newest, Date.parse(message.sentAt)),
+            0,
+          );
+          if (newestAt > 0 && newestAt < watermark.getTime())
+            watermark = new Date(newestAt);
           const result = await input.store.persistConversation(
             input.account,
             conversation,
@@ -278,27 +285,42 @@ async function runWindowedBackfill(input: {
           input.counts.updatedCount += result.updatedMessages;
           if (result.analysisEnqueued) input.counts.analysisEnqueuedCount += 1;
         }
+        // Checkpoint after every page so progress is durable even if the run is
+        // killed before the next page.
+        await input.store.saveBackfillState(input.account, {
+          oldestCoveredAt: watermark.toISOString(),
+          targetSince: targetSince.toISOString(),
+          ...(pendingHistoryId ? { pendingHistoryId } : {}),
+          done: false,
+          updatedAt: input.now.toISOString(),
+        });
+        if (
+          input.signal?.aborted ||
+          Date.now() - startedAtMs > BACKFILL_SOFT_BUDGET_MS
+        ) {
+          budgetHit = true;
+          break;
+        }
       }
+      // The pull ran to completion without stopping for the budget → the whole
+      // window down to targetSince is covered.
+      if (!budgetHit) done = true;
     } catch (error) {
-      // If the parent aborted (hit the run cap), stop cleanly without
-      // advancing the watermark past this incomplete window. Any other error
-      // is real and should fail the run.
-      if (input.signal?.aborted) windowCompleted = false;
+      // A parent abort (hit the run cap) leaves the last checkpoint intact and
+      // stops cleanly. Any other error is real and should fail the run.
+      if (input.signal?.aborted) budgetHit = true;
       else throw error;
     }
-
-    if (!windowCompleted) break;
-
-    coverEnd = windowStart;
-    done = coverEnd.getTime() <= targetSince.getTime();
-    await input.store.saveBackfillState(input.account, {
-      oldestCoveredAt: coverEnd.toISOString(),
-      targetSince: targetSince.toISOString(),
-      ...(pendingHistoryId ? { pendingHistoryId } : {}),
-      done,
-      updatedAt: input.now.toISOString(),
-    });
   }
+
+  const finalWatermark = done ? targetSince : watermark;
+  await input.store.saveBackfillState(input.account, {
+    oldestCoveredAt: finalWatermark.toISOString(),
+    targetSince: targetSince.toISOString(),
+    ...(pendingHistoryId ? { pendingHistoryId } : {}),
+    done,
+    updatedAt: input.now.toISOString(),
+  });
 
   const resolvedCursor: GmailSyncCursor = {
     historyId: pendingHistoryId ?? "0",
@@ -306,7 +328,7 @@ async function runWindowedBackfill(input: {
     updatedAt: input.now.toISOString(),
   };
   // A completed backfill keeps its entry-point name (initial/recovery); one that
-  // still has older windows to cover reports "backfill" so callers know to run
+  // still has older mail to cover reports "backfill" so callers know to run
   // again.
   const mode: GmailSyncResult["mode"] = done
     ? input.recovered
@@ -332,7 +354,7 @@ async function runWindowedBackfill(input: {
       mode,
       recoveredHistoryCursor: input.recovered,
       backfillPending: !done,
-      oldestCoveredAt: coverEnd.toISOString(),
+      oldestCoveredAt: finalWatermark.toISOString(),
     },
   });
   return {
