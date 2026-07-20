@@ -42,9 +42,11 @@ export function continueBackfillIfPending(
 
   after(async () => {
     try {
-      // A short timeout releases this parent once the request is dispatched; the
-      // child invocation runs independently (it ignores the request signal for
-      // chained calls, so the parent giving up cannot cancel it).
+      // The timeout must outlive a cold start: aborting before the platform has
+      // invoked the child kills the dispatch entirely (observed in prod when a
+      // fresh deployment broke the chain at the first cold hop). 30s is safely
+      // past any cold start; the child runs detached long after we abort (it
+      // ignores the request signal for chained calls).
       await fetch(nextUrl, {
         method: "POST",
         headers: {
@@ -52,7 +54,7 @@ export function continueBackfillIfPending(
           "content-type": "application/json",
         },
         body: "{}",
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(30_000),
       });
     } catch {
       // Expected: the abort above, or a transient dispatch error. The daily
