@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { auth, isOwnerSession } from "@/lib/auth";
 import { boundedInvocationId } from "@/src/sync/auth";
+import { continueBackfillIfPending } from "@/src/sync/continuation";
 import {
   normalizeRequestedChannels,
   unifiedSyncInputSchema,
@@ -39,6 +40,9 @@ async function executeOwnerSync(request: Request, data: SyncInput) {
   });
   const ok = summary.status !== "failed";
   console.log(`[threadline-sync] manual ${JSON.stringify(summary)}`);
+  // An owner click starts the self-sustaining backfill chain (chain 0); it
+  // cascades server-side until the whole history is loaded, then stops.
+  continueBackfillIfPending(request, summary, 0);
   return NextResponse.json({ ok, summary }, { status: ok ? 200 : 502 });
 }
 

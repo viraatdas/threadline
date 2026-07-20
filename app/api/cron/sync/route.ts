@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { boundedInvocationId, isAuthorizedCronRequest } from "@/src/sync/auth";
 import {
+  continueBackfillIfPending,
+  readChainCount,
+} from "@/src/sync/continuation";
+import {
   normalizeRequestedChannels,
   unifiedSyncInputSchema,
 } from "@/src/sync/request";
@@ -60,10 +64,14 @@ async function handleScheduledSync(request: Request, body: unknown) {
     `scheduled:${minuteBucket.toISOString()}`,
   );
   const channels = normalizeRequestedChannels(parsed.data.channels);
+  // A self-chained link runs detached: the parent that dispatched it gives up
+  // its connection after a few seconds, so honoring the request signal would
+  // abort the run. The scheduled (chain 0) invocation keeps the platform signal.
+  const chainCount = readChainCount(url);
   const summary = await runUnifiedSync({
     trigger: "scheduled",
     invocationId,
-    signal: request.signal,
+    ...(chainCount === 0 ? { signal: request.signal } : {}),
     maxConcurrency: 3,
     maxAttempts: 2,
     timeoutMs: 270_000,
@@ -78,5 +86,6 @@ async function handleScheduledSync(request: Request, body: unknown) {
   const ok = summary.status !== "failed";
   // Counts/status only — never message content. Lets operators verify a run.
   console.log(`[threadline-sync] scheduled ${JSON.stringify(summary)}`);
+  continueBackfillIfPending(request, summary, chainCount);
   return NextResponse.json({ ok, summary }, { status: ok ? 200 : 502 });
 }

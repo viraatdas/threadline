@@ -6,7 +6,7 @@
   "crons": [
     {
       "path": "/api/cron/sync?gmailForceBackfill=1&gmailBackfillDays=3650&channels=gmail",
-      "schedule": "*/2 * * * *"
+      "schedule": "0 15 * * *"
     }
   ]
 }
