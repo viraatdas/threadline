@@ -7,8 +7,10 @@ import { CHANNEL_VALUES, REPLY_STATE_VALUES } from "@/lib/domain/constants";
 
 import {
   addContact,
+  archiveContact,
   mergeContacts,
   moveRelationshipStage,
+  restoreContact,
 } from "../workspace-actions";
 
 export const metadata: Metadata = {
@@ -79,6 +81,8 @@ export default async function PeoplePage({
             addContactAction: addContact,
             mergeContactsAction: mergeContacts,
             moveStageAction: moveRelationshipStage,
+            archiveContactAction: archiveContact,
+            restoreContactAction: restoreContact,
           })}
     />
   );

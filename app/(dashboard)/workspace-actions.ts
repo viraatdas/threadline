@@ -766,6 +766,134 @@ export async function moveRelationshipStage(
   }
 }
 
+// Delete is an archive: synced contacts are re-created by the next sync if
+// the row is removed, so the row stays and metadata.archivedAt hides it from
+// every read path instead. Restore clears the flag (powers the undo toast).
+export async function archiveContact(
+  contactIdInput: string,
+): Promise<WorkspaceActionResult<ContactMutationReceipt>> {
+  const session = await requireOwner();
+  const contactId = uuidSchema.safeParse(contactIdInput);
+  if (!contactId.success) return { ok: false, error: "The relationship ID is invalid." };
+  const actorEmail = actorFromSession(session);
+  const occurredAt = new Date();
+
+  try {
+    const companyId = await getDatabase().transaction(async (transaction) => {
+      const [current] = await transaction
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, contactId.data))
+        .limit(1);
+      if (!current) throw new WorkspaceMutationError("The relationship no longer exists.");
+      await transaction
+        .update(contacts)
+        .set({
+          metadata: {
+            ...current.metadata,
+            archivedAt: occurredAt.toISOString(),
+            archivedBy: actorEmail,
+          },
+          hasManualOverride: true,
+          manuallyOverriddenAt: occurredAt,
+          manualOverrides: prependOverrides(
+            current.manualOverrides,
+            [
+              {
+                field: "archivedAt",
+                value: occurredAt.toISOString(),
+                reason: "Deleted by the owner. Source history stays stored but hidden.",
+              },
+            ],
+            actorEmail,
+            occurredAt,
+          ),
+          updatedAt: occurredAt,
+        })
+        .where(eq(contacts.id, contactId.data));
+      await transaction.insert(auditEvents).values({
+        action: "contact.archived",
+        outcome: "success",
+        actorEmail,
+        entityType: "contact",
+        entityId: contactId.data,
+        metadata: { displayName: current.displayName },
+        occurredAt,
+      });
+      return current.companyId;
+    });
+    revalidateContact(contactId.data, companyId);
+    return {
+      ok: true,
+      data: { contactId: contactId.data, actorEmail, occurredAt: occurredAt.toISOString() },
+    };
+  } catch (error) {
+    return mutationFailure(error, "The relationship could not be deleted.");
+  }
+}
+
+export async function restoreContact(
+  contactIdInput: string,
+): Promise<WorkspaceActionResult<ContactMutationReceipt>> {
+  const session = await requireOwner();
+  const contactId = uuidSchema.safeParse(contactIdInput);
+  if (!contactId.success) return { ok: false, error: "The relationship ID is invalid." };
+  const actorEmail = actorFromSession(session);
+  const occurredAt = new Date();
+
+  try {
+    const companyId = await getDatabase().transaction(async (transaction) => {
+      const [current] = await transaction
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, contactId.data))
+        .limit(1);
+      if (!current) throw new WorkspaceMutationError("The relationship no longer exists.");
+      const metadata = { ...current.metadata };
+      delete metadata.archivedAt;
+      delete metadata.archivedBy;
+      await transaction
+        .update(contacts)
+        .set({
+          metadata,
+          hasManualOverride: true,
+          manuallyOverriddenAt: occurredAt,
+          manualOverrides: prependOverrides(
+            current.manualOverrides,
+            [
+              {
+                field: "archivedAt",
+                value: null,
+                reason: "Restored by the owner.",
+              },
+            ],
+            actorEmail,
+            occurredAt,
+          ),
+          updatedAt: occurredAt,
+        })
+        .where(eq(contacts.id, contactId.data));
+      await transaction.insert(auditEvents).values({
+        action: "contact.restored",
+        outcome: "success",
+        actorEmail,
+        entityType: "contact",
+        entityId: contactId.data,
+        metadata: { displayName: current.displayName },
+        occurredAt,
+      });
+      return current.companyId;
+    });
+    revalidateContact(contactId.data, companyId);
+    return {
+      ok: true,
+      data: { contactId: contactId.data, actorEmail, occurredAt: occurredAt.toISOString() },
+    };
+  } catch (error) {
+    return mutationFailure(error, "The relationship could not be restored.");
+  }
+}
+
 export async function editCompany(
   companyIdInput: string,
   formData: FormData,

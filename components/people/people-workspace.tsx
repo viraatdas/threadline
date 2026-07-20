@@ -8,6 +8,7 @@ import {
   GitMerge,
   Plus,
   Search,
+  Trash2,
   UserRoundPlus,
 } from "lucide-react";
 import Link from "next/link";
@@ -38,8 +39,10 @@ import { PageHeader } from "@/components/shell";
 import type { RelationshipStage } from "@/lib/domain/constants";
 import type {
   AddContactAction,
+  ArchiveContactAction,
   MergeContactsAction,
   MoveRelationshipStageAction,
+  RestoreContactAction,
 } from "@/components/workspace-actions";
 import { workspaceActionError } from "@/components/workspace-actions";
 
@@ -50,11 +53,15 @@ interface PeopleWorkspaceProps {
   addContactAction?: AddContactAction;
   mergeContactsAction?: MergeContactsAction;
   moveStageAction?: MoveRelationshipStageAction;
+  archiveContactAction?: ArchiveContactAction;
+  restoreContactAction?: RestoreContactAction;
 }
 
 interface UndoState {
   people: PersonRecord[];
   message: string;
+  // Set when undo must also restore the archived contact on the server.
+  restoreContactId?: string;
 }
 
 function writeFilters(filters: PeopleFilters) {
@@ -204,6 +211,8 @@ export function PeopleWorkspace({
   addContactAction,
   mergeContactsAction,
   moveStageAction,
+  archiveContactAction,
+  restoreContactAction,
 }: PeopleWorkspaceProps) {
   const [people, setPeople] = useState(data.people);
   const [filters, setFilters] = useState(initialFilters);
@@ -457,6 +466,67 @@ export function PeopleWorkspace({
     })();
   }
 
+  function handleDelete(person: PersonRecord) {
+    const snapshot = people;
+    setActionError(null);
+    setPeople((current) => current.filter((item) => item.id !== person.id));
+
+    if (!archiveContactAction) {
+      setUndo({
+        people: snapshot,
+        message: `${person.displayName} was deleted.`,
+      });
+      return;
+    }
+
+    setUndo(null);
+    void (async () => {
+      try {
+        const result = await archiveContactAction(person.id);
+        const error = workspaceActionError(
+          result,
+          "The relationship could not be deleted.",
+        );
+        if (error) {
+          setPeople(snapshot);
+          setActionError(error);
+          return;
+        }
+        setUndo({
+          people: snapshot,
+          message: `${person.displayName} was deleted.`,
+          restoreContactId: person.id,
+        });
+      } catch {
+        setPeople(snapshot);
+        setActionError(
+          "The relationship could not be deleted. Check your connection and try again.",
+        );
+      }
+    })();
+  }
+
+  function handleUndo(undoState: UndoState) {
+    setPeople(undoState.people);
+    setUndo(null);
+    const restoreId = undoState.restoreContactId;
+    if (!restoreId || !restoreContactAction) return;
+    void (async () => {
+      try {
+        const result = await restoreContactAction(restoreId);
+        const error = workspaceActionError(
+          result,
+          "The relationship could not be restored.",
+        );
+        if (error) setActionError(error);
+      } catch {
+        setActionError(
+          "The relationship could not be restored. Check your connection and try again.",
+        );
+      }
+    })();
+  }
+
   const hasFilters =
     filters.query !== "" ||
     filters.reply !== "all" ||
@@ -626,6 +696,7 @@ export function PeopleWorkspace({
           companies={data.companies}
           generatedAt={data.generatedAt}
           {...(moveStageAction ? { onMoveStage: handleMoveStage } : {})}
+          {...(archiveContactAction ? { onDelete: handleDelete } : {})}
         />
       ) : filters.view === "people" ? (
         visiblePeople.length ? (
@@ -764,6 +835,20 @@ export function PeopleWorkspace({
                           />
                           Merge
                         </button>
+                        {archiveContactAction ? (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${person.displayName}`}
+                            onClick={() => handleDelete(person)}
+                            className="mr-1 inline-grid size-8 place-items-center rounded-[6px] text-ink-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger/10 hover:text-danger focus:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
+                          >
+                            <Trash2
+                              className="size-3.5"
+                              strokeWidth={1.8}
+                              aria-hidden="true"
+                            />
+                          </button>
+                        ) : null}
                         <Link
                           href={`/people/${person.id}`}
                           aria-label={`Open ${person.displayName}`}
@@ -821,6 +906,20 @@ export function PeopleWorkspace({
                         aria-hidden="true"
                       />
                     </button>
+                    {archiveContactAction ? (
+                      <button
+                        type="button"
+                        aria-label={`Delete ${person.displayName}`}
+                        onClick={() => handleDelete(person)}
+                        className="grid size-9 place-items-center rounded-[7px] border border-line text-ink-muted hover:text-danger"
+                      >
+                        <Trash2
+                          className="size-3.5"
+                          strokeWidth={1.8}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    ) : null}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <ReplyBadge state={person.replyState} />
@@ -1171,10 +1270,7 @@ export function PeopleWorkspace({
       {undo ? (
         <UndoNotice
           message={undo.message}
-          onUndo={() => {
-            setPeople(undo.people);
-            setUndo(null);
-          }}
+          onUndo={() => handleUndo(undo)}
           onDismiss={() => setUndo(null)}
         />
       ) : null}

@@ -460,9 +460,25 @@ function compareNewest(
 }
 
 export function mapPeopleWorkspaceData(
-  rows: PeopleWorkspaceRows,
+  input: PeopleWorkspaceRows,
   generatedAt = new Date(),
 ): PeopleWorkspaceData {
+  // Owner-deleted contacts keep their row (so syncs cannot resurrect them)
+  // but are hidden from every view, including company rollups and plans.
+  const archivedContactIds = new Set(
+    input.contacts
+      .filter((contact) => Boolean(contact.metadata.archivedAt))
+      .map((contact) => contact.id),
+  );
+  const rows: PeopleWorkspaceRows = {
+    ...input,
+    contacts: input.contacts.filter(
+      (contact) => !archivedContactIds.has(contact.id),
+    ),
+    outreachPlans: input.outreachPlans.filter(
+      (plan) => !archivedContactIds.has(plan.contactId),
+    ),
+  };
   const generatedAtIso = generatedAt.toISOString();
   const companyById = new Map(
     rows.companies.map((company) => [company.id, company]),

@@ -88,6 +88,46 @@ describe("people and company workspace", () => {
     ).toHaveValue("active");
   });
 
+  it("deletes a relationship from the board and restores it through undo", async () => {
+    const user = userEvent.setup();
+    const ana = workspaceData.people.find(
+      (person) => person.displayName === "Ana Torres",
+    );
+    const receipt = {
+      ok: true as const,
+      data: {
+        contactId: ana?.id ?? "",
+        actorEmail: "owner@threadline.local",
+        occurredAt: new Date().toISOString(),
+      },
+    };
+    const archiveContactAction = vi.fn(async () => receipt);
+    const restoreContactAction = vi.fn(async () => receipt);
+
+    render(
+      <PeopleWorkspace
+        data={workspaceData}
+        initialFilters={{ ...filters, view: "board" }}
+        archiveContactAction={archiveContactAction}
+        restoreContactAction={restoreContactAction}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Delete Ana Torres" }),
+    );
+    expect(screen.queryByText("Ana Torres")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(archiveContactAction).toHaveBeenCalledWith(ana?.id),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    expect(screen.getAllByText("Ana Torres").length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(restoreContactAction).toHaveBeenCalledWith(ana?.id),
+    );
+  });
+
   it("adds and merges manual relationships with a reversible local mutation", async () => {
     const user = userEvent.setup();
     render(<PeopleWorkspace data={workspaceData} initialFilters={filters} />);

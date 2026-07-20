@@ -75,6 +75,14 @@ export type MoveRelationshipStageAction = (
   stage: RelationshipStage,
 ) => Promise<WorkspaceActionResult<ContactMutationReceipt>>;
 
+export type ArchiveContactAction = (
+  contactId: string,
+) => Promise<WorkspaceActionResult<ContactMutationReceipt>>;
+
+export type RestoreContactAction = (
+  contactId: string,
+) => Promise<WorkspaceActionResult<ContactMutationReceipt>>;
+
 export type EditCompanyAction = (
   companyId: string,
   formData: FormData,

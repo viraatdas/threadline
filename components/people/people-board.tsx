@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -45,6 +45,7 @@ interface PeopleBoardProps {
   companies: CompanyRecord[];
   generatedAt: string;
   onMoveStage?: (person: PersonRecord, stage: RelationshipStage) => void;
+  onDelete?: (person: PersonRecord) => void;
 }
 
 function companyNameFor(person: PersonRecord, companies: CompanyRecord[]) {
@@ -57,6 +58,7 @@ export function PeopleBoard({
   companies,
   generatedAt,
   onMoveStage,
+  onDelete,
 }: PeopleBoardProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
@@ -213,17 +215,33 @@ export function PeopleBoard({
                               {companyNameFor(person, companies)}
                             </p>
                           </div>
-                          <Link
-                            href={`/people/${person.id}`}
-                            aria-label={`Open ${person.displayName}`}
-                            className="grid size-6 shrink-0 place-items-center rounded-[6px] text-ink-faint hover:bg-surface-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-                          >
-                            <ChevronRight
-                              className="size-4"
-                              strokeWidth={1.8}
-                              aria-hidden="true"
-                            />
-                          </Link>
+                          <span className="flex shrink-0 items-center">
+                            {onDelete ? (
+                              <button
+                                type="button"
+                                aria-label={`Delete ${person.displayName}`}
+                                onClick={() => onDelete(person)}
+                                className="grid size-6 place-items-center rounded-[6px] text-ink-faint hover:bg-danger/10 hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"
+                              >
+                                <Trash2
+                                  className="size-3.5"
+                                  strokeWidth={1.8}
+                                  aria-hidden="true"
+                                />
+                              </button>
+                            ) : null}
+                            <Link
+                              href={`/people/${person.id}`}
+                              aria-label={`Open ${person.displayName}`}
+                              className="grid size-6 place-items-center rounded-[6px] text-ink-faint hover:bg-surface-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                            >
+                              <ChevronRight
+                                className="size-4"
+                                strokeWidth={1.8}
+                                aria-hidden="true"
+                              />
+                            </Link>
+                          </span>
                         </div>
 
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
