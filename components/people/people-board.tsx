@@ -10,6 +10,7 @@ import {
   followUpStatus,
   formatTimeAgo,
   initials,
+  isNoiseEmail,
 } from "@/components/people/formatters";
 import type {
   CompanyRecord,
@@ -44,8 +45,41 @@ interface PeopleBoardProps {
   people: PersonRecord[];
   companies: CompanyRecord[];
   generatedAt: string;
+  ownerDomain?: string | null;
   onMoveStage?: (person: PersonRecord, stage: RelationshipStage) => void;
   onDelete?: (person: PersonRecord) => void;
+}
+
+type BoardLens = "outreach" | "conversations" | "all";
+
+// A conversation the owner took part in: they emailed the person, got a
+// reply, or added the person by hand.
+function isConversation(person: PersonRecord): boolean {
+  return (
+    person.outboundTouchCount > 0 ||
+    person.replyState === "replied" ||
+    person.hasManualOverride
+  );
+}
+
+// The default lens: outreach the owner STARTED — the earliest stored message
+// went from them to a real person outside their own company. This is the
+// cold-outreach pipeline (pitch → reply → follow-up); inbound-first threads,
+// teammates, and bulk senders live behind the wider lenses.
+export function isOutreach(
+  person: PersonRecord,
+  ownerDomain: string | null,
+): boolean {
+  if (person.hasManualOverride) return true;
+  if (isNoiseEmail(person.primaryEmail)) return false;
+  const domain = person.primaryEmail?.split("@")[1]?.toLowerCase() ?? null;
+  if (ownerDomain && domain === ownerDomain.toLowerCase()) return false;
+  const messages = person.timeline.filter(
+    (item) => item.kind === "message" || item.kind === "reply",
+  );
+  // Timeline is newest-first, so the last entry is the thread's origin.
+  const earliest = messages[messages.length - 1];
+  return earliest?.direction === "outbound";
 }
 
 function companyNameFor(person: PersonRecord, companies: CompanyRecord[]) {
@@ -57,6 +91,7 @@ export function PeopleBoard({
   people,
   companies,
   generatedAt,
+  ownerDomain = null,
   onMoveStage,
   onDelete,
 }: PeopleBoardProps) {
@@ -64,20 +99,19 @@ export function PeopleBoard({
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
     null,
   );
-  const [outreachOnly, setOutreachOnly] = useState(true);
+  const [lens, setLens] = useState<BoardLens>("outreach");
   const canMove = Boolean(onMoveStage);
 
-  // A genuine conversation is one you took part in: you emailed them
-  // (outbound), they replied to you, or you added/edited them by hand.
-  // Pure inbound mail (newsletters, promos, cold inbound) is filtered out.
-  const isConversation = (person: PersonRecord) =>
-    person.outboundTouchCount > 0 ||
-    person.replyState === "replied" ||
-    person.hasManualOverride;
-  const hiddenCount = people.filter(
-    (person) => !isConversation(person),
-  ).length;
-  const shownPeople = outreachOnly ? people.filter(isConversation) : people;
+  const outreachPeople = people.filter((person) =>
+    isOutreach(person, ownerDomain),
+  );
+  const conversationPeople = people.filter(isConversation);
+  const shownPeople =
+    lens === "outreach"
+      ? outreachPeople
+      : lens === "conversations"
+        ? conversationPeople
+        : people;
 
   const grouped = new Map<RelationshipStage, PersonRecord[]>(
     STAGE_COLUMNS.map((column) => [column.stage, [] as PersonRecord[]]),
@@ -104,18 +138,22 @@ export function PeopleBoard({
           {shownPeople.length} relationships by stage
         </h2>
         <div className="flex items-center gap-3">
-          {hiddenCount > 0 ? (
-            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-muted">
-              <input
-                type="checkbox"
-                checked={outreachOnly}
-                onChange={(event) => setOutreachOnly(event.target.checked)}
-                className="size-3.5 accent-accent"
-              />
-              My conversations only
-              <span className="text-ink-faint">({hiddenCount} inbound hidden)</span>
-            </label>
-          ) : null}
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted">
+            Show
+            <select
+              value={lens}
+              onChange={(event) => setLens(event.target.value as BoardLens)}
+              className="h-6 cursor-pointer rounded-[6px] border border-line bg-background px-1.5 text-[11px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <option value="outreach">
+                Outreach I started ({outreachPeople.length})
+              </option>
+              <option value="conversations">
+                All conversations ({conversationPeople.length})
+              </option>
+              <option value="all">Everything ({people.length})</option>
+            </select>
+          </label>
           <p className="hidden text-[11px] text-ink-faint sm:block">
             {canMove
               ? "Drag a card between columns to update the pipeline"

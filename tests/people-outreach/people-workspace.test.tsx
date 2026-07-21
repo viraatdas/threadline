@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { PeopleWorkspace, workspaceData } from "@/components/people";
+import { isOutreach } from "@/components/people/people-board";
 
 const filters = {
   query: "",
@@ -86,6 +87,35 @@ describe("people and company workspace", () => {
     expect(
       screen.getByRole("combobox", { name: "Move Ana Torres to a stage" }),
     ).toHaveValue("active");
+  });
+
+  it("defaults the board to outreach the owner started, with wider lenses", async () => {
+    const user = userEvent.setup();
+    const outreachCount = workspaceData.people.filter((person) =>
+      isOutreach(person, null),
+    ).length;
+
+    render(
+      <PeopleWorkspace
+        data={workspaceData}
+        initialFilters={{ ...filters, view: "board" }}
+      />,
+    );
+
+    const lens = screen.getByRole("combobox", { name: /show/i });
+    expect(lens).toHaveValue("outreach");
+    expect(
+      screen.getByRole("heading", {
+        name: `${outreachCount} relationships by stage`,
+      }),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(lens, "all");
+    expect(
+      screen.getByRole("heading", {
+        name: `${workspaceData.people.length} relationships by stage`,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("deletes a relationship from the board and restores it through undo", async () => {

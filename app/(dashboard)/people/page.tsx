@@ -72,6 +72,7 @@ export default async function PeoplePage({
     <PeopleWorkspace
       data={data}
       initialFilters={parseFilters(params)}
+      ownerDomain={process.env.OWNER_EMAIL?.split("@")[1] ?? null}
       {...(mergeId && data.people.some((person) => person.id === mergeId)
         ? { initialMergeSourceId: mergeId }
         : {})}

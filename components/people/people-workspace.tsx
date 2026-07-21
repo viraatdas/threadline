@@ -50,6 +50,7 @@ interface PeopleWorkspaceProps {
   data: PeopleWorkspaceData;
   initialFilters: PeopleFilters;
   initialMergeSourceId?: string;
+  ownerDomain?: string | null;
   addContactAction?: AddContactAction;
   mergeContactsAction?: MergeContactsAction;
   moveStageAction?: MoveRelationshipStageAction;
@@ -208,6 +209,7 @@ export function PeopleWorkspace({
   data,
   initialFilters,
   initialMergeSourceId,
+  ownerDomain = null,
   addContactAction,
   mergeContactsAction,
   moveStageAction,
@@ -695,6 +697,7 @@ export function PeopleWorkspace({
           people={visiblePeople}
           companies={data.companies}
           generatedAt={data.generatedAt}
+          ownerDomain={ownerDomain}
           {...(moveStageAction ? { onMoveStage: handleMoveStage } : {})}
           {...(archiveContactAction ? { onDelete: handleDelete } : {})}
         />
