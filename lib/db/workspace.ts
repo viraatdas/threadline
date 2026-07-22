@@ -93,6 +93,27 @@ function requiredIso(value: Date | string, fallback: string): string {
   return toIso(value) ?? fallback;
 }
 
+// The cheap-model conversation digest written by /api/cron/enrich.
+function readAiDigest(
+  metadata: unknown,
+): { text: string; kind: string; at: string } | null {
+  const record = asRecord(metadata);
+  const digest = record ? asRecord(record.aiDigest) : null;
+  if (
+    !digest ||
+    typeof digest.text !== "string" ||
+    digest.text.length === 0 ||
+    typeof digest.at !== "string"
+  ) {
+    return null;
+  }
+  return {
+    text: digest.text,
+    kind: typeof digest.kind === "string" ? digest.kind : "other",
+    at: digest.at,
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -631,6 +652,7 @@ export function mapPeopleWorkspaceData(
         confidence: contact.confidence,
         notes: contact.notes,
         hasManualOverride: contact.hasManualOverride,
+        aiDigest: readAiDigest(contact.metadata),
         identities,
         timeline,
         recentMessages,

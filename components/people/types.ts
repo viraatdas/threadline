@@ -100,6 +100,8 @@ export interface PersonRecord {
   confidence: Contact["confidence"];
   notes: Contact["notes"];
   hasManualOverride: Contact["hasManualOverride"];
+  // One-sentence cheap-model gist of the conversation, from /api/cron/enrich.
+  aiDigest?: { text: string; kind: string; at: string } | null;
   identities: ChannelIdentityView[];
   timeline: TimelineItem[];
   recentMessages: RecentMessage[];

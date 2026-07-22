@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronRight, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -287,6 +287,22 @@ export function PeopleBoard({
                             </Link>
                           </span>
                         </div>
+
+                        {person.aiDigest ? (
+                          <p
+                            className="mt-2 flex items-start gap-1.5 text-[11px] leading-[1.5] text-ink"
+                            title={`AI gist (${person.aiDigest.kind}) — generated ${formatTimeAgo(person.aiDigest.at, generatedAt)}`}
+                          >
+                            <Sparkles
+                              className="mt-[2px] size-3 shrink-0 text-accent"
+                              strokeWidth={1.8}
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0">
+                              {person.aiDigest.text}
+                            </span>
+                          </p>
+                        ) : null}
 
                         {person.recentMessages[0] ? (
                           <Link
