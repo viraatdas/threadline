@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 
 import type {
@@ -19,6 +19,7 @@ import type {
 } from "@/components/workspace-actions";
 import { requireOwner } from "@/lib/auth";
 import { getDatabase } from "@/lib/db/client";
+import { WORKSPACE_CACHE_TAG } from "@/lib/db/workspace";
 import {
   analysisJobs,
   analysisResults,
@@ -270,6 +271,7 @@ async function enqueueDraftJob(
 }
 
 function revalidateContact(contactId: string, companyId?: string | null) {
+  revalidateTag(WORKSPACE_CACHE_TAG, "max");
   revalidatePath("/people");
   revalidatePath(`/people/${contactId}`);
   revalidatePath("/outreach");
@@ -959,6 +961,7 @@ export async function editCompany(
         occurredAt,
       });
     });
+    revalidateTag(WORKSPACE_CACHE_TAG, "max");
     revalidatePath("/people");
     revalidatePath(`/people/companies/${companyId.data}`);
     return {
@@ -1019,6 +1022,7 @@ export async function correctCompany(
         occurredAt,
       });
     });
+    revalidateTag(WORKSPACE_CACHE_TAG, "max");
     revalidatePath("/people");
     revalidatePath(`/people/companies/${companyId.data}`);
     return {

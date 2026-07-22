@@ -16,7 +16,11 @@ const { revalidatePathMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
+vi.mock("next/cache", () => ({
+  revalidatePath: revalidatePathMock,
+  revalidateTag: vi.fn(),
+  unstable_cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+}));
 vi.mock("@/lib/auth", () => ({
   requireOwner: vi.fn(async () => ({ user: { email: "owner@example.com" } })),
 }));

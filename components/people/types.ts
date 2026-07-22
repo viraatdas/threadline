@@ -102,6 +102,9 @@ export interface PersonRecord {
   hasManualOverride: Contact["hasManualOverride"];
   // One-sentence cheap-model gist of the conversation, from /api/cron/enrich.
   aiDigest?: { text: string; kind: string; at: string } | null;
+  // Direction of the thread's earliest stored message — computed server-side
+  // because list payloads ship with an empty timeline.
+  firstMessageDirection?: "inbound" | "outbound" | "internal" | null;
   identities: ChannelIdentityView[];
   timeline: TimelineItem[];
   recentMessages: RecentMessage[];

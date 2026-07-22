@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import { cache } from "react";
 
 import type {
@@ -91,6 +92,19 @@ function toIso(value: Date | string | null | undefined): string | null {
 
 function requiredIso(value: Date | string, fallback: string): string {
   return toIso(value) ?? fallback;
+}
+
+// Timeline is newest-first; the last message/reply entry is the thread origin.
+function firstMessageDirectionOf(
+  timeline: TimelineItem[],
+): "inbound" | "outbound" | "internal" | null {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = timeline[index];
+    if (item && (item.kind === "message" || item.kind === "reply")) {
+      return item.direction;
+    }
+  }
+  return null;
 }
 
 // The cheap-model conversation digest written by /api/cron/enrich.
@@ -653,6 +667,7 @@ export function mapPeopleWorkspaceData(
         notes: contact.notes,
         hasManualOverride: contact.hasManualOverride,
         aiDigest: readAiDigest(contact.metadata),
+        firstMessageDirection: firstMessageDirectionOf(timeline),
         identities,
         timeline,
         recentMessages,
@@ -964,12 +979,25 @@ function stripOutreachOnlyDetails(data: PeopleWorkspaceData): PeopleWorkspaceDat
   };
 }
 
-export const loadPeopleListWorkspaceData = cache(async () =>
-  stripListOnlyDetails(await loadPeopleWorkspaceDataUncached()),
+// Cross-request cache for the heavy list payloads: the whole app is
+// owner-only, so the data is not user-scoped. Mutating server actions bust
+// the tag immediately; background syncs surface within a minute.
+export const WORKSPACE_CACHE_TAG = "workspace";
+
+export const loadPeopleListWorkspaceData = cache(
+  unstable_cache(
+    async () => stripListOnlyDetails(await loadPeopleWorkspaceDataUncached()),
+    ["people-list-workspace"],
+    { revalidate: 60, tags: [WORKSPACE_CACHE_TAG] },
+  ),
 );
 
-export const loadOutreachWorkspaceData = cache(async () =>
-  stripOutreachOnlyDetails(await loadPeopleWorkspaceDataUncached()),
+export const loadOutreachWorkspaceData = cache(
+  unstable_cache(
+    async () => stripOutreachOnlyDetails(await loadPeopleWorkspaceDataUncached()),
+    ["outreach-workspace"],
+    { revalidate: 60, tags: [WORKSPACE_CACHE_TAG] },
+  ),
 );
 
 function linkedResultJobIds(records: { metadata: Record<string, unknown> }[]) {

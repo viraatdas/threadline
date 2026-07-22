@@ -74,6 +74,11 @@ export function isOutreach(
   if (isNoiseEmail(person.primaryEmail)) return false;
   const domain = person.primaryEmail?.split("@")[1]?.toLowerCase() ?? null;
   if (ownerDomain && domain === ownerDomain.toLowerCase()) return false;
+  // Prefer the server-computed origin direction: list payloads ship with an
+  // empty timeline, so deriving it client-side would hide everyone.
+  if (person.firstMessageDirection !== undefined) {
+    return person.firstMessageDirection === "outbound";
+  }
   const messages = person.timeline.filter(
     (item) => item.kind === "message" || item.kind === "reply",
   );
@@ -99,7 +104,14 @@ export function PeopleBoard({
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
     null,
   );
-  const [lens, setLens] = useState<BoardLens>("outreach");
+  // Default to the narrowest lens that actually has people, so the board
+  // never opens blank while data is still syncing or sparse.
+  const [lens, setLens] = useState<BoardLens>(() => {
+    if (people.some((person) => isOutreach(person, ownerDomain)))
+      return "outreach";
+    if (people.some(isConversation)) return "conversations";
+    return "all";
+  });
   const canMove = Boolean(onMoveStage);
 
   const outreachPeople = people.filter((person) =>
