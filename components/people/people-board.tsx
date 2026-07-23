@@ -1,9 +1,16 @@
 "use client";
 
-import { ChevronRight, Sparkles, Trash2 } from "lucide-react";
+import { ChevronRight, Sparkles, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import {
+  extractCampaignTerms,
+  loadCampaigns,
+  matchesCampaign,
+  saveCampaigns,
+  type Campaign,
+} from "@/components/people/campaigns";
 import { ChannelMark } from "@/components/people/channel-mark";
 import {
   avatarHue,
@@ -16,28 +23,57 @@ import type {
   CompanyRecord,
   PersonRecord,
 } from "@/components/people/types";
-import { RELATIONSHIP_STAGE_VALUES } from "@/lib/domain/constants";
 import type { RelationshipStage } from "@/lib/domain/constants";
 
 interface StageColumn {
-  stage: RelationshipStage;
+  // The stage written when a card is dropped or moved into this column.
+  canonical: RelationshipStage;
+  // Every stored stage this column absorbs — the database enum still has 7
+  // stages, but the pipeline only needs 4 answers: not sent, their turn,
+  // your turn, done.
+  stages: readonly RelationshipStage[];
   label: string;
   hint: string;
 }
 
 const STAGE_COLUMNS: StageColumn[] = [
-  { stage: "planned", label: "Planned", hint: "Outreach intended, not sent yet" },
-  { stage: "waiting", label: "Waiting for reply", hint: "You reached out, no reply yet" },
-  { stage: "replied", label: "Replied", hint: "They replied — active conversation" },
-  { stage: "active", label: "Active", hint: "Ongoing back-and-forth" },
-  { stage: "dormant", label: "Dormant", hint: "Gone quiet, may revisit" },
-  { stage: "closed", label: "Closed", hint: "No further follow-up" },
-  { stage: "unreviewed", label: "Unreviewed", hint: "New, not yet triaged" },
+  {
+    canonical: "planned",
+    stages: ["planned"],
+    label: "Planned",
+    hint: "Not sent yet",
+  },
+  {
+    canonical: "waiting",
+    stages: ["waiting", "dormant", "unreviewed"],
+    label: "Waiting for reply",
+    hint: "Sent — their turn",
+  },
+  {
+    canonical: "replied",
+    stages: ["replied", "active"],
+    label: "Replied",
+    hint: "They answered — your turn",
+  },
+  {
+    canonical: "closed",
+    stages: ["closed"],
+    label: "Closed",
+    hint: "Done",
+  },
 ];
 
 export function stageLabel(stage: RelationshipStage): string {
   return (
-    STAGE_COLUMNS.find((column) => column.stage === stage)?.label ?? stage
+    STAGE_COLUMNS.find((column) => column.stages.includes(stage))?.label ??
+    stage
+  );
+}
+
+function bucketOf(stage: RelationshipStage): StageColumn {
+  return (
+    STAGE_COLUMNS.find((column) => column.stages.includes(stage)) ??
+    STAGE_COLUMNS[1]!
   );
 }
 
@@ -114,29 +150,74 @@ export function PeopleBoard({
   });
   const canMove = Boolean(onMoveStage);
 
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() =>
+    loadCampaigns(),
+  );
+  const [activeCampaignId, setActiveCampaignId] = useState("");
+  const [campaignFormOpen, setCampaignFormOpen] = useState(false);
+  const [campaignName, setCampaignName] = useState("");
+  const [campaignSample, setCampaignSample] = useState("");
+
   const outreachPeople = people.filter((person) =>
     isOutreach(person, ownerDomain),
   );
   const conversationPeople = people.filter(isConversation);
-  const shownPeople =
+  const lensPeople =
     lens === "outreach"
       ? outreachPeople
       : lens === "conversations"
         ? conversationPeople
         : people;
 
+  const activeCampaign =
+    campaigns.find((campaign) => campaign.id === activeCampaignId) ?? null;
+  const campaignTerms = useMemo(
+    () => (activeCampaign ? extractCampaignTerms(activeCampaign.sample) : []),
+    [activeCampaign],
+  );
+  const shownPeople = activeCampaign
+    ? lensPeople.filter((person) => matchesCampaign(person, campaignTerms))
+    : lensPeople;
+
+  function createCampaign() {
+    const name = campaignName.trim();
+    const sample = campaignSample.trim();
+    if (!name || !sample) return;
+    const campaign: Campaign = {
+      id: crypto.randomUUID(),
+      name,
+      sample,
+      createdAt: new Date().toISOString(),
+    };
+    const next = [...campaigns, campaign];
+    setCampaigns(next);
+    saveCampaigns(next);
+    setActiveCampaignId(campaign.id);
+    setCampaignFormOpen(false);
+    setCampaignName("");
+    setCampaignSample("");
+  }
+
+  function removeCampaign(id: string) {
+    const next = campaigns.filter((campaign) => campaign.id !== id);
+    setCampaigns(next);
+    saveCampaigns(next);
+    if (activeCampaignId === id) setActiveCampaignId("");
+  }
+
   const grouped = new Map<RelationshipStage, PersonRecord[]>(
-    STAGE_COLUMNS.map((column) => [column.stage, [] as PersonRecord[]]),
+    STAGE_COLUMNS.map((column) => [column.canonical, [] as PersonRecord[]]),
   );
   for (const person of shownPeople) {
-    const bucket = grouped.get(person.relationshipStage);
-    if (bucket) bucket.push(person);
-    else grouped.set(person.relationshipStage, [person]);
+    grouped.get(bucketOf(person.relationshipStage).canonical)?.push(person);
   }
 
   function move(personId: string, stage: RelationshipStage) {
     const person = people.find((item) => item.id === personId);
-    if (!person || person.relationshipStage === stage) return;
+    // Moving within the same bucket is a no-op even when the stored stage
+    // differs (e.g. dormant → waiting).
+    if (!person || bucketOf(person.relationshipStage).canonical === stage)
+      return;
     onMoveStage?.(person, stage);
   }
 
@@ -167,21 +248,95 @@ export function PeopleBoard({
             </select>
           </label>
           <p className="hidden text-[11px] text-ink-faint sm:block">
-            {canMove
-              ? "Drag a card between columns to update the pipeline"
-              : "Read-only preview"}
+            {canMove ? "Drag cards between stages" : "Read-only preview"}
           </p>
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted">
+          Campaign
+          <select
+            value={activeCampaignId}
+            onChange={(event) => setActiveCampaignId(event.target.value)}
+            className="h-6 max-w-[200px] cursor-pointer rounded-[6px] border border-line bg-background px-1.5 text-[11px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <option value="">All outreach</option>
+            {campaigns.map((campaign) => (
+              <option key={campaign.id} value={campaign.id}>
+                {campaign.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {activeCampaign ? (
+          <>
+            <span className="text-[11px] text-ink-faint">
+              {shownPeople.length} matched by sample message
+            </span>
+            <button
+              type="button"
+              aria-label={`Delete campaign ${activeCampaign.name}`}
+              onClick={() => removeCampaign(activeCampaign.id)}
+              className="grid size-5 place-items-center rounded-[5px] text-ink-faint hover:bg-danger/10 hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <X className="size-3" strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setCampaignFormOpen((open) => !open)}
+          className="h-6 rounded-[6px] border border-line bg-background px-2 text-[11px] text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {campaignFormOpen ? "Cancel" : "New campaign"}
+        </button>
+      </div>
+
+      {campaignFormOpen ? (
+        <div className="max-w-xl space-y-2 rounded-[10px] border border-line bg-surface-subtle p-3">
+          <label className="block">
+            <span className="text-[11px] font-medium text-ink">
+              Campaign name
+            </span>
+            <input
+              value={campaignName}
+              onChange={(event) => setCampaignName(event.target.value)}
+              placeholder="YC alum outreach"
+              className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-ink">
+              Sample message
+            </span>
+            <textarea
+              value={campaignSample}
+              onChange={(event) => setCampaignSample(event.target.value)}
+              rows={5}
+              placeholder="Paste one email you sent for this campaign — the board keeps conversations whose messages share its distinctive language."
+              className="mt-1 w-full rounded-[6px] border border-line bg-background p-2 text-[12px] leading-relaxed text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={createCampaign}
+            disabled={!campaignName.trim() || !campaignSample.trim()}
+            className="h-7 rounded-[6px] bg-accent px-3 text-[12px] font-medium text-white disabled:opacity-40"
+          >
+            Save campaign
+          </button>
+        </div>
+      ) : null}
+
       <div className="-mx-1 overflow-x-auto pb-2">
         <div className="flex min-w-max gap-3 px-1">
           {STAGE_COLUMNS.map((column) => {
-            const columnPeople = grouped.get(column.stage) ?? [];
-            const isDropTarget = dragOverStage === column.stage;
+            const columnPeople = grouped.get(column.canonical) ?? [];
+            const isDropTarget = dragOverStage === column.canonical;
             return (
               <div
-                key={column.stage}
+                key={column.canonical}
                 className={`flex w-[264px] shrink-0 flex-col rounded-[10px] border bg-surface-subtle transition-colors ${
                   isDropTarget
                     ? "border-accent/50 bg-accent-subtle"
@@ -190,19 +345,19 @@ export function PeopleBoard({
                 onDragOver={(event) => {
                   if (!canMove || !draggedId) return;
                   event.preventDefault();
-                  setDragOverStage(column.stage);
+                  setDragOverStage(column.canonical);
                 }}
                 onDragLeave={(event) => {
                   if (event.currentTarget.contains(event.relatedTarget as Node))
                     return;
                   setDragOverStage((current) =>
-                    current === column.stage ? null : current,
+                    current === column.canonical ? null : current,
                   );
                 }}
                 onDrop={(event) => {
                   if (!canMove || !draggedId) return;
                   event.preventDefault();
-                  move(draggedId, column.stage);
+                  move(draggedId, column.canonical);
                   setDraggedId(null);
                   setDragOverStage(null);
                 }}
@@ -411,7 +566,9 @@ export function PeopleBoard({
                                 Move {person.displayName} to a stage
                               </span>
                               <select
-                                value={person.relationshipStage}
+                                value={
+                                  bucketOf(person.relationshipStage).canonical
+                                }
                                 onChange={(event) =>
                                   move(
                                     person.id,
@@ -420,9 +577,12 @@ export function PeopleBoard({
                                 }
                                 className="h-6 max-w-[120px] cursor-pointer rounded-[6px] border border-transparent bg-transparent px-1 text-[10px] text-ink-faint transition-colors hover:border-line hover:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent"
                               >
-                                {RELATIONSHIP_STAGE_VALUES.map((stage) => (
-                                  <option key={stage} value={stage}>
-                                    Stage: {stageLabel(stage)}
+                                {STAGE_COLUMNS.map((column) => (
+                                  <option
+                                    key={column.canonical}
+                                    value={column.canonical}
+                                  >
+                                    Stage: {column.label}
                                   </option>
                                 ))}
                               </select>

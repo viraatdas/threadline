@@ -78,15 +78,15 @@ describe("people and company workspace", () => {
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Move Ana Torres to a stage" }),
-      "active",
+      "replied",
     );
 
     await waitFor(() =>
-      expect(moveStageAction).toHaveBeenCalledWith(ana?.id, "active"),
+      expect(moveStageAction).toHaveBeenCalledWith(ana?.id, "replied"),
     );
     expect(
       screen.getByRole("combobox", { name: "Move Ana Torres to a stage" }),
-    ).toHaveValue("active");
+    ).toHaveValue("replied");
   });
 
   it("defaults the board to outreach the owner started, with wider lenses", async () => {

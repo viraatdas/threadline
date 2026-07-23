@@ -3,11 +3,12 @@ import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getDatabase } from "@/lib/db/client";
-import { contacts, touchpoints } from "@/lib/db/schema";
+import { contacts, messages, touchpoints } from "@/lib/db/schema";
 import {
   buildDigestPrompt,
   conversationDigestSchema,
 } from "@/src/enrichment/digest";
+import { extractSignatureFacts } from "@/src/enrichment/signature";
 import { isAuthorizedCronRequest } from "@/src/sync/auth";
 
 export const runtime = "nodejs";
@@ -34,6 +35,57 @@ export async function POST(request: Request) {
     : DEFAULT_BATCH;
 
   const db = getDatabase();
+
+  // Pass 1 — deterministic: fill missing titles from inbound signature blocks.
+  // Runs even when no model is reachable.
+  let titlesUpdated = 0;
+  const untitled = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(
+      and(
+        isNotNull(contacts.lastTouchAt),
+        notArchivedFilter,
+        sql`(${contacts.title} is null or ${contacts.title} = '')`,
+        eq(contacts.hasManualOverride, false),
+      ),
+    )
+    .orderBy(desc(contacts.lastTouchAt))
+    .limit(MAX_BATCH);
+  for (const contact of untitled) {
+    try {
+      const inbound = await db
+        .select({ bodyText: messages.bodyText })
+        .from(touchpoints)
+        .innerJoin(messages, eq(messages.id, touchpoints.messageId))
+        .where(
+          and(
+            eq(touchpoints.contactId, contact.id),
+            eq(messages.direction, "inbound"),
+            isNotNull(messages.bodyText),
+          ),
+        )
+        .orderBy(desc(messages.sentAt))
+        .limit(3);
+      const facts = inbound
+        .map((row) => extractSignatureFacts(row.bodyText))
+        .find(Boolean);
+      if (!facts) continue;
+      await db
+        .update(contacts)
+        .set({ title: facts.title })
+        .where(
+          and(
+            eq(contacts.id, contact.id),
+            sql`(${contacts.title} is null or ${contacts.title} = '')`,
+          ),
+        );
+      titlesUpdated += 1;
+    } catch {
+      // Skip quietly; the next pass retries.
+    }
+  }
+
   const candidates = await db
     .select({
       id: contacts.id,
@@ -114,13 +166,14 @@ export async function POST(request: Request) {
   }
 
   console.log(
-    `[threadline-enrich] scanned=${candidates.length} updated=${updated} failed=${failed} model=${DIGEST_MODEL}`,
+    `[threadline-enrich] scanned=${candidates.length} updated=${updated} failed=${failed} titles=${titlesUpdated} model=${DIGEST_MODEL}`,
   );
   return NextResponse.json({
-    ok: failed === 0 || updated > 0,
+    ok: failed === 0 || updated > 0 || titlesUpdated > 0,
     scanned: candidates.length,
     updated,
     failed,
+    titlesUpdated,
     model: DIGEST_MODEL,
   });
 }

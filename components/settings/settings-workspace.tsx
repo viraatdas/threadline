@@ -280,6 +280,10 @@ export function SettingsWorkspace() {
   const [statuses, setStatuses] = useState(initialStatuses);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [linkedinFormOpen, setLinkedinFormOpen] = useState(false);
+  const [linkedApiToken, setLinkedApiToken] = useState("");
+  const [identificationToken, setIdentificationToken] = useState("");
+  const [linkedinConnecting, setLinkedinConnecting] = useState(false);
 
   const loadStatuses = useCallback(async (signal?: AbortSignal) => {
     const controller = new AbortController();
@@ -311,6 +315,39 @@ export function SettingsWorkspace() {
   const refreshStatuses = useCallback(async () => {
     setStatuses(await loadStatuses());
   }, [loadStatuses]);
+
+  async function connectLinkedin() {
+    setLinkedinConnecting(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/integrations/linkedin/connection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          linkedApiToken: linkedApiToken.trim(),
+          identificationToken: identificationToken.trim(),
+        }),
+      });
+      if (response.ok) {
+        setNotice("LinkedIn connected. Run a sync to pull messages.");
+        setLinkedinFormOpen(false);
+        setLinkedApiToken("");
+        setIdentificationToken("");
+        await refreshStatuses();
+      } else {
+        const payload = await readPayload(response);
+        setNotice(
+          typeof payload.error === "string"
+            ? payload.error
+            : "LinkedIn connection failed — check both tokens.",
+        );
+      }
+    } catch {
+      setNotice("LinkedIn connection failed — check both tokens.");
+    } finally {
+      setLinkedinConnecting(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -433,6 +470,15 @@ export function SettingsWorkspace() {
                         Connect Gmail
                       </Link>
                     ) : null}
+                    {key === "linkedin" && status.state !== "connected" ? (
+                      <button
+                        type="button"
+                        onClick={() => setLinkedinFormOpen((open) => !open)}
+                        className={secondaryButtonClass}
+                      >
+                        {linkedinFormOpen ? "Cancel" : "Connect LinkedIn"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void runSync(key)}
@@ -448,6 +494,55 @@ export function SettingsWorkspace() {
                       Sync {name}
                     </button>
                   </div>
+                  {key === "linkedin" && linkedinFormOpen ? (
+                    <div className="max-w-md space-y-2 rounded-[10px] border border-line bg-surface-subtle p-3 lg:col-span-3">
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-ink">
+                          Linked API token
+                        </span>
+                        <input
+                          type="password"
+                          value={linkedApiToken}
+                          onChange={(event) =>
+                            setLinkedApiToken(event.target.value)
+                          }
+                          autoComplete="off"
+                          className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-ink">
+                          Identification token
+                        </span>
+                        <input
+                          type="password"
+                          value={identificationToken}
+                          onChange={(event) =>
+                            setIdentificationToken(event.target.value)
+                          }
+                          autoComplete="off"
+                          className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                        />
+                      </label>
+                      <p className="text-[11px] leading-4 text-ink-faint">
+                        Both values come from your Linked API dashboard. They
+                        are stored encrypted server-side and never rendered
+                        back.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void connectLinkedin()}
+                        disabled={
+                          linkedinConnecting ||
+                          !linkedApiToken.trim() ||
+                          !identificationToken.trim()
+                        }
+                        className="h-7 rounded-[6px] bg-accent px-3 text-[12px] font-medium text-white disabled:opacity-40"
+                      >
+                        {linkedinConnecting ? "Connecting…" : "Save and connect"}
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               );
             },
