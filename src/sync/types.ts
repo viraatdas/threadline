@@ -92,6 +92,9 @@ export interface SyncReconciler {
   reconcile(input: {
     integrationAccountIds: readonly string[];
     now: Date;
+    // Only contacts whose touchpoints changed at/after this instant are
+    // recomputed. Omitted → full recompute (first run, manual repair).
+    touchedSince?: Date;
   }): Promise<SyncReconciliationSummary>;
 }
 

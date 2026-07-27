@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 
 import type { ThreadlineDatabase } from "@/lib/db/client";
 import {
@@ -234,6 +234,7 @@ export class PostgresSyncReconciler implements SyncReconciler {
   reconcile(input: {
     integrationAccountIds: readonly string[];
     now: Date;
+    touchedSince?: Date;
   }): Promise<SyncReconciliationSummary> {
     if (input.integrationAccountIds.length === 0) {
       return Promise.resolve({
@@ -366,9 +367,17 @@ export class PostgresSyncReconciler implements SyncReconciler {
         .selectDistinct({ contactId: touchpoints.contactId })
         .from(touchpoints)
         .where(
-          inArray(touchpoints.integrationAccountId, [
-            ...input.integrationAccountIds,
-          ]),
+          and(
+            inArray(touchpoints.integrationAccountId, [
+              ...input.integrationAccountIds,
+            ]),
+            // Without this bound the recompute set is every contact the
+            // account ever touched — O(total history) per sync, which blew
+            // past the platform's 300s window once the archive grew.
+            ...(input.touchedSince
+              ? [gte(touchpoints.updatedAt, input.touchedSince)]
+              : []),
+          ),
         );
       for (const row of touchedContactRows)
         recomputeContactIds.add(row.contactId);

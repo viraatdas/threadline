@@ -55,6 +55,10 @@ export class UnifiedSyncOrchestrator {
         reconciliation = await this.reconciler.reconcile({
           integrationAccountIds: acquiredAccountIds,
           now: new Date(),
+          // Recomputing every contact the account ever touched scales with
+          // total history and eventually exceeds the function window; scope
+          // to this run's writes (small skew for clock drift).
+          touchedSince: new Date(startedAt.getTime() - 60_000),
         });
       } catch (error) {
         reconciliationError = errorMessage(error);
