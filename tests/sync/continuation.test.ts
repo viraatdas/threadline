@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { gmailBackfillPending, readChainCount } from "@/src/sync/continuation";
+import { readFileSync } from "node:fs";
+
+import { GMAIL_BACKFILL_TARGET_DAYS } from "@/src/integrations/gmail/constants";
+import {
+  BACKFILL_QUERY,
+  gmailBackfillPending,
+  readChainCount,
+} from "@/src/sync/continuation";
 import type { UnifiedSyncSummary } from "@/src/sync/types";
 
-function summary(
-  outcomes: UnifiedSyncSummary["outcomes"],
-): UnifiedSyncSummary {
+function summary(outcomes: UnifiedSyncSummary["outcomes"]): UnifiedSyncSummary {
   return {
     invocationId: "test",
     trigger: "manual",
@@ -89,14 +94,27 @@ describe("backfill continuation", () => {
 
   it("reads and defaults the chain counter safely", () => {
     expect(readChainCount(new URL("https://x.dev/api/cron/sync"))).toBe(0);
-    expect(readChainCount(new URL("https://x.dev/api/cron/sync?_chain=5"))).toBe(
-      5,
-    );
+    expect(
+      readChainCount(new URL("https://x.dev/api/cron/sync?_chain=5")),
+    ).toBe(5);
     expect(
       readChainCount(new URL("https://x.dev/api/cron/sync?_chain=-3")),
     ).toBe(0);
     expect(
       readChainCount(new URL("https://x.dev/api/cron/sync?_chain=abc")),
     ).toBe(0);
+  });
+
+  it("keeps the chain link, the cron, and the target depth in step", () => {
+    const cron = JSON.parse(readFileSync("vercel.json", "utf8")) as {
+      crons: { path: string }[];
+    };
+    expect(GMAIL_BACKFILL_TARGET_DAYS).toBe(548);
+    expect(BACKFILL_QUERY).toContain(
+      `gmailBackfillDays=${GMAIL_BACKFILL_TARGET_DAYS}`,
+    );
+    expect(cron.crons.map((c) => c.path)).toContain(
+      `/api/cron/sync?${BACKFILL_QUERY}`,
+    );
   });
 });

@@ -45,6 +45,7 @@ import type {
   RestoreContactAction,
 } from "@/components/workspace-actions";
 import { workspaceActionError } from "@/components/workspace-actions";
+import type { MatchProjectAction } from "@/components/people/projects";
 
 interface PeopleWorkspaceProps {
   data: PeopleWorkspaceData;
@@ -56,6 +57,7 @@ interface PeopleWorkspaceProps {
   moveStageAction?: MoveRelationshipStageAction;
   archiveContactAction?: ArchiveContactAction;
   restoreContactAction?: RestoreContactAction;
+  matchProjectAction?: MatchProjectAction;
 }
 
 interface UndoState {
@@ -215,6 +217,7 @@ export function PeopleWorkspace({
   moveStageAction,
   archiveContactAction,
   restoreContactAction,
+  matchProjectAction,
 }: PeopleWorkspaceProps) {
   const [people, setPeople] = useState(data.people);
   const [filters, setFilters] = useState(initialFilters);
@@ -700,6 +703,7 @@ export function PeopleWorkspace({
           ownerDomain={ownerDomain}
           {...(moveStageAction ? { onMoveStage: handleMoveStage } : {})}
           {...(archiveContactAction ? { onDelete: handleDelete } : {})}
+          {...(matchProjectAction ? { matchProjectAction } : {})}
         />
       ) : filters.view === "people" ? (
         visiblePeople.length ? (

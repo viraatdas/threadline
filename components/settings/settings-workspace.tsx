@@ -11,17 +11,12 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/shell";
 
 type IntegrationKey = "gmail" | "linkedin" | "x";
-type ConnectionState =
-  | "checking"
-  | "connected"
-  | "attention"
-  | "not_connected";
+type ConnectionState = "checking" | "connected" | "attention" | "not_connected";
 
 interface IntegrationStatus {
   state: ConnectionState;
@@ -48,8 +43,7 @@ const integrations: IntegrationDefinition[] = [
   {
     key: "linkedin",
     name: "LinkedIn",
-    description:
-      "Inbox conversations and identity context through Linked API.",
+    description: "Inbox conversations and identity context through Linked API.",
     setup: "Provision Linked API credentials through the secure operator flow.",
     icon: ContactRound,
   },
@@ -83,16 +77,11 @@ function statusLabel(state: ConnectionState) {
 function StatusIcon({ state }: { state: ConnectionState }) {
   if (state === "connected") {
     return (
-      <CheckCircle2
-        className="size-4 text-accent-strong"
-        aria-hidden="true"
-      />
+      <CheckCircle2 className="size-4 text-accent-strong" aria-hidden="true" />
     );
   }
   if (state === "attention") {
-    return (
-      <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
-    );
+    return <AlertTriangle className="size-4 text-warning" aria-hidden="true" />;
   }
   return <CircleDashed className="size-4 text-ink-faint" aria-hidden="true" />;
 }
@@ -291,10 +280,7 @@ export function SettingsWorkspace() {
     const results = await Promise.all(
       integrations.map(async ({ key }) => {
         try {
-          return [
-            key,
-            await loadIntegrationStatus(key, activeSignal),
-          ] as const;
+          return [key, await loadIntegrationStatus(key, activeSignal)] as const;
         } catch {
           return [
             key,
@@ -418,135 +404,135 @@ export function SettingsWorkspace() {
           </p>
         </div>
         <div className="border-y border-line">
-          {integrations.map(
-            ({ key, name, description, setup, icon: Icon }) => {
-              const status = statuses[key];
-              const syncedAt = formatLastSync(status.lastSyncedAt);
-              return (
-                <article
-                  key={key}
-                  className="grid gap-4 border-b border-line py-5 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_minmax(230px,0.55fr)_auto] lg:items-center"
-                >
-                  <div className="flex min-w-0 items-start gap-3.5">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-surface-subtle text-ink-muted">
-                      <Icon
-                        className="size-4"
-                        strokeWidth={1.8}
-                        aria-hidden="true"
-                      />
-                    </span>
-                    <div>
-                      <h3 className="text-[13px] font-semibold text-ink">
-                        {name}
-                      </h3>
-                      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-                        {description}
-                      </p>
-                      <p className="mt-1 text-[11px] leading-5 text-ink-faint">
-                        {setup}
-                      </p>
-                    </div>
-                  </div>
+          {integrations.map(({ key, name, description, setup, icon: Icon }) => {
+            const status = statuses[key];
+            const syncedAt = formatLastSync(status.lastSyncedAt);
+            return (
+              <article
+                key={key}
+                className="grid gap-4 border-b border-line py-5 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_minmax(230px,0.55fr)_auto] lg:items-center"
+              >
+                <div className="flex min-w-0 items-start gap-3.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-surface-subtle text-ink-muted">
+                    <Icon
+                      className="size-4"
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  </span>
                   <div>
-                    <div className="flex items-center gap-2 text-[12px] font-semibold text-ink">
-                      <StatusIcon state={status.state} />
-                      {statusLabel(status.state)}
-                    </div>
-                    <p className="mt-1 text-[11px] leading-5 text-ink-muted">
-                      {status.detail}
+                    <h3 className="text-[13px] font-semibold text-ink">
+                      {name}
+                    </h3>
+                    <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+                      {description}
                     </p>
-                    {syncedAt ? (
-                      <p className="mt-1 text-[10px] text-ink-faint">
-                        Last synced {syncedAt}
-                      </p>
-                    ) : null}
+                    <p className="mt-1 text-[11px] leading-5 text-ink-faint">
+                      {setup}
+                    </p>
                   </div>
-                  <div className="flex flex-wrap gap-2 lg:justify-end">
-                    {key === "gmail" && status.state !== "connected" ? (
-                      <Link
-                        href="/api/integrations/gmail/connect"
-                        className={secondaryButtonClass}
-                      >
-                        Connect Gmail
-                      </Link>
-                    ) : null}
-                    {key === "linkedin" && status.state !== "connected" ? (
-                      <button
-                        type="button"
-                        onClick={() => setLinkedinFormOpen((open) => !open)}
-                        className={secondaryButtonClass}
-                      >
-                        {linkedinFormOpen ? "Cancel" : "Connect LinkedIn"}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void runSync(key)}
-                      disabled={
-                        status.state !== "connected" || activeAction !== null
-                      }
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 text-[12px] font-semibold text-ink">
+                    <StatusIcon state={status.state} />
+                    {statusLabel(status.state)}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5 text-ink-muted">
+                    {status.detail}
+                  </p>
+                  {syncedAt ? (
+                    <p className="mt-1 text-[10px] text-ink-faint">
+                      Last synced {syncedAt}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  {/* Plain anchor: the connect route 307s to Google, and a
+                        Next Link would prefetch it, minting a fresh OAuth state
+                        cookie on every hover and racing the real click. */}
+                  {key === "gmail" && status.state !== "connected" ? (
+                    <a
+                      href="/api/integrations/gmail/connect?returnTo=/settings"
                       className={secondaryButtonClass}
                     >
-                      <RefreshCw
-                        className={`size-3.5 ${activeAction === key ? "animate-spin" : ""}`}
-                        aria-hidden="true"
+                      Connect Gmail
+                    </a>
+                  ) : null}
+                  {key === "linkedin" && status.state !== "connected" ? (
+                    <button
+                      type="button"
+                      onClick={() => setLinkedinFormOpen((open) => !open)}
+                      className={secondaryButtonClass}
+                    >
+                      {linkedinFormOpen ? "Cancel" : "Connect LinkedIn"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void runSync(key)}
+                    disabled={
+                      status.state !== "connected" || activeAction !== null
+                    }
+                    className={secondaryButtonClass}
+                  >
+                    <RefreshCw
+                      className={`size-3.5 ${activeAction === key ? "animate-spin" : ""}`}
+                      aria-hidden="true"
+                    />
+                    Sync {name}
+                  </button>
+                </div>
+                {key === "linkedin" && linkedinFormOpen ? (
+                  <div className="max-w-md space-y-2 rounded-[10px] border border-line bg-surface-subtle p-3 lg:col-span-3">
+                    <label className="block">
+                      <span className="text-[11px] font-medium text-ink">
+                        Linked API token
+                      </span>
+                      <input
+                        type="password"
+                        value={linkedApiToken}
+                        onChange={(event) =>
+                          setLinkedApiToken(event.target.value)
+                        }
+                        autoComplete="off"
+                        className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
                       />
-                      Sync {name}
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-medium text-ink">
+                        Identification token
+                      </span>
+                      <input
+                        type="password"
+                        value={identificationToken}
+                        onChange={(event) =>
+                          setIdentificationToken(event.target.value)
+                        }
+                        autoComplete="off"
+                        className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                      />
+                    </label>
+                    <p className="text-[11px] leading-4 text-ink-faint">
+                      Both values come from your Linked API dashboard. They are
+                      stored encrypted server-side and never rendered back.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void connectLinkedin()}
+                      disabled={
+                        linkedinConnecting ||
+                        !linkedApiToken.trim() ||
+                        !identificationToken.trim()
+                      }
+                      className="h-7 rounded-[6px] bg-accent px-3 text-[12px] font-medium text-white disabled:opacity-40"
+                    >
+                      {linkedinConnecting ? "Connecting…" : "Save and connect"}
                     </button>
                   </div>
-                  {key === "linkedin" && linkedinFormOpen ? (
-                    <div className="max-w-md space-y-2 rounded-[10px] border border-line bg-surface-subtle p-3 lg:col-span-3">
-                      <label className="block">
-                        <span className="text-[11px] font-medium text-ink">
-                          Linked API token
-                        </span>
-                        <input
-                          type="password"
-                          value={linkedApiToken}
-                          onChange={(event) =>
-                            setLinkedApiToken(event.target.value)
-                          }
-                          autoComplete="off"
-                          className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-[11px] font-medium text-ink">
-                          Identification token
-                        </span>
-                        <input
-                          type="password"
-                          value={identificationToken}
-                          onChange={(event) =>
-                            setIdentificationToken(event.target.value)
-                          }
-                          autoComplete="off"
-                          className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
-                        />
-                      </label>
-                      <p className="text-[11px] leading-4 text-ink-faint">
-                        Both values come from your Linked API dashboard. They
-                        are stored encrypted server-side and never rendered
-                        back.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void connectLinkedin()}
-                        disabled={
-                          linkedinConnecting ||
-                          !linkedApiToken.trim() ||
-                          !identificationToken.trim()
-                        }
-                        className="h-7 rounded-[6px] bg-accent px-3 text-[12px] font-medium text-white disabled:opacity-40"
-                      >
-                        {linkedinConnecting ? "Connecting…" : "Save and connect"}
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            },
-          )}
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       </section>
 

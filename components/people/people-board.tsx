@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronRight, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronRight, Sparkles, Target, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import {
   extractCampaignTerms,
@@ -11,6 +11,16 @@ import {
   saveCampaigns,
   type Campaign,
 } from "@/components/people/campaigns";
+import {
+  contextForPerson,
+  loadProjects,
+  loadVerdicts,
+  saveProjects,
+  saveVerdicts,
+  type MatchProjectAction,
+  type Project,
+  type ProjectVerdict,
+} from "@/components/people/projects";
 import { ChannelMark } from "@/components/people/channel-mark";
 import {
   avatarHue,
@@ -84,6 +94,7 @@ interface PeopleBoardProps {
   ownerDomain?: string | null;
   onMoveStage?: (person: PersonRecord, stage: RelationshipStage) => void;
   onDelete?: (person: PersonRecord) => void;
+  matchProjectAction?: MatchProjectAction;
 }
 
 type BoardLens = "outreach" | "conversations" | "all";
@@ -135,6 +146,7 @@ export function PeopleBoard({
   ownerDomain = null,
   onMoveStage,
   onDelete,
+  matchProjectAction,
 }: PeopleBoardProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<RelationshipStage | null>(
@@ -158,6 +170,32 @@ export function PeopleBoard({
   const [campaignName, setCampaignName] = useState("");
   const [campaignSample, setCampaignSample] = useState("");
 
+  // Projects: an LLM decides who is relevant to a project the owner defines.
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [matchError, setMatchError] = useState<string | null>(null);
+  // Bumped after a successful match so cached verdicts are re-read from storage.
+  const [matchVersion, setMatchVersion] = useState(0);
+  const [isMatching, startMatching] = useTransition();
+
+  // Cap how many people one classification considers — the list is sorted
+  // newest-touch first, so this keeps latency and cost bounded on large boards.
+  const MATCH_LIMIT = 60;
+
+  const activeProject =
+    projects.find((project) => project.id === activeProjectId) ?? null;
+
+  // Derive cached verdicts from storage — keyed on the active project and the
+  // match version, so no effect (and no cascading render) is needed.
+  const verdicts = useMemo<Record<string, ProjectVerdict>>(
+    () => (activeProjectId ? loadVerdicts(activeProjectId) : {}),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProjectId, matchVersion],
+  );
+
   const outreachPeople = people.filter((person) =>
     isOutreach(person, ownerDomain),
   );
@@ -175,9 +213,88 @@ export function PeopleBoard({
     () => (activeCampaign ? extractCampaignTerms(activeCampaign.sample) : []),
     [activeCampaign],
   );
-  const shownPeople = activeCampaign
+  const campaignPeople = activeCampaign
     ? lensPeople.filter((person) => matchesCampaign(person, campaignTerms))
     : lensPeople;
+
+  const hasVerdicts = Object.keys(verdicts).length > 0;
+  // With a project active and verdicts loaded, show only matches, best first.
+  const shownPeople =
+    activeProject && hasVerdicts
+      ? campaignPeople
+          .filter((person) => verdicts[person.id]?.match)
+          .sort(
+            (left, right) =>
+              (verdicts[right.id]?.confidence ?? 0) -
+              (verdicts[left.id]?.confidence ?? 0),
+          )
+      : campaignPeople;
+
+  function createProject() {
+    const name = projectName.trim();
+    const description = projectDescription.trim();
+    if (!name || !description) return;
+    const project: Project = {
+      id: crypto.randomUUID(),
+      name,
+      description,
+      createdAt: new Date().toISOString(),
+    };
+    const next = [...projects, project];
+    setProjects(next);
+    saveProjects(next);
+    setActiveProjectId(project.id);
+    setProjectFormOpen(false);
+    setProjectName("");
+    setProjectDescription("");
+  }
+
+  function removeProject(id: string) {
+    const next = projects.filter((project) => project.id !== id);
+    setProjects(next);
+    saveProjects(next);
+    if (activeProjectId === id) setActiveProjectId("");
+  }
+
+  function runMatch() {
+    if (!activeProject || !matchProjectAction) return;
+    const candidates = campaignPeople.slice(0, MATCH_LIMIT);
+    if (candidates.length === 0) {
+      setMatchError("No people in this view to match.");
+      return;
+    }
+    setMatchError(null);
+    startMatching(async () => {
+      const result = await matchProjectAction({
+        name: activeProject.name,
+        description: activeProject.description,
+        contacts: candidates.map((person) => ({
+          id: person.id,
+          name: person.displayName,
+          title: person.title.value || null,
+          company: companyNameFor(person, companies) || null,
+          digest: person.aiDigest?.text ?? null,
+          context: contextForPerson(person) || null,
+        })),
+      });
+      if (!result.ok) {
+        setMatchError(result.error);
+        return;
+      }
+      const at = new Date().toISOString();
+      const next: Record<string, ProjectVerdict> = { ...verdicts };
+      for (const verdict of result.data.verdicts) {
+        next[verdict.id] = {
+          match: verdict.match,
+          confidence: verdict.confidence,
+          reason: verdict.reason,
+          at,
+        };
+      }
+      saveVerdicts(activeProject.id, next);
+      setMatchVersion((version) => version + 1);
+    });
+  }
 
   function createCampaign() {
     const name = campaignName.trim();
@@ -329,6 +446,118 @@ export function PeopleBoard({
         </div>
       ) : null}
 
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted">
+          <Target
+            className="size-3 text-accent"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          Project
+          <select
+            value={activeProjectId}
+            onChange={(event) => {
+              setActiveProjectId(event.target.value);
+              setMatchError(null);
+            }}
+            className="h-6 max-w-[200px] cursor-pointer rounded-[6px] border border-line bg-background px-1.5 text-[11px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <option value="">None</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {activeProject ? (
+          <>
+            {matchProjectAction ? (
+              <button
+                type="button"
+                onClick={runMatch}
+                disabled={isMatching}
+                className="inline-flex h-6 items-center gap-1 rounded-[6px] bg-accent px-2 text-[11px] font-medium text-white disabled:opacity-50"
+              >
+                <Sparkles
+                  className="size-3"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                {isMatching
+                  ? "Matching…"
+                  : hasVerdicts
+                    ? "Re-match with AI"
+                    : "Match with AI"}
+              </button>
+            ) : null}
+            {hasVerdicts && !isMatching ? (
+              <span className="text-[11px] text-ink-faint">
+                {shownPeople.length} match
+                {shownPeople.length === 1 ? "" : "es"} in view
+              </span>
+            ) : null}
+            <button
+              type="button"
+              aria-label={`Delete project ${activeProject.name}`}
+              onClick={() => removeProject(activeProject.id)}
+              className="grid size-5 place-items-center rounded-[5px] text-ink-faint hover:bg-danger/10 hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <X className="size-3" strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setProjectFormOpen((open) => !open)}
+          className="h-6 rounded-[6px] border border-line bg-background px-2 text-[11px] text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {projectFormOpen ? "Cancel" : "New project"}
+        </button>
+      </div>
+
+      {matchError ? (
+        <p className="max-w-xl rounded-[8px] border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11px] text-danger">
+          {matchError}
+        </p>
+      ) : null}
+
+      {projectFormOpen ? (
+        <div className="max-w-xl space-y-2 rounded-[10px] border border-line bg-surface-subtle p-3">
+          <label className="block">
+            <span className="text-[11px] font-medium text-ink">
+              Project name
+            </span>
+            <input
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              placeholder="Libra"
+              className="mt-1 h-8 w-full rounded-[6px] border border-line bg-background px-2 text-[12px] text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-ink">
+              Who is this for?
+            </span>
+            <textarea
+              value={projectDescription}
+              onChange={(event) => setProjectDescription(event.target.value)}
+              rows={4}
+              placeholder="Describe the project and the kind of person worth reaching — their role, what they'd care about, why they'd be a fit. The model reads each contact and decides who matches."
+              className="mt-1 w-full rounded-[6px] border border-line bg-background p-2 text-[12px] leading-relaxed text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={createProject}
+            disabled={!projectName.trim() || !projectDescription.trim()}
+            className="h-7 rounded-[6px] bg-accent px-3 text-[12px] font-medium text-white disabled:opacity-40"
+          >
+            Save project
+          </button>
+        </div>
+      ) : null}
+
       <div className="-mx-1 overflow-x-auto pb-2">
         <div className="flex min-w-max gap-3 px-1">
           {STAGE_COLUMNS.map((column) => {
@@ -454,6 +683,29 @@ export function PeopleBoard({
                             </Link>
                           </span>
                         </div>
+
+                        {activeProject && verdicts[person.id]?.match ? (
+                          <p className="mt-2 flex items-start gap-1.5 rounded-[6px] bg-accent-subtle/60 px-2 py-1.5 text-[11px] leading-[1.5] text-ink">
+                            <Target
+                              className="mt-[2px] size-3 shrink-0 text-accent"
+                              strokeWidth={1.8}
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0">
+                              {verdicts[person.id]?.reason || "Relevant to this project."}
+                              {typeof verdicts[person.id]?.confidence ===
+                              "number" ? (
+                                <span className="ml-1 text-ink-faint tabular-nums">
+                                  ·{" "}
+                                  {Math.round(
+                                    (verdicts[person.id]?.confidence ?? 0) * 100,
+                                  )}
+                                  %
+                                </span>
+                              ) : null}
+                            </span>
+                          </p>
+                        ) : null}
 
                         {person.aiDigest ? (
                           <p

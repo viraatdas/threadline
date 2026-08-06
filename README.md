@@ -47,7 +47,7 @@ database; CI uses the isolated `threadline_test` service database.
 
 Threadline deploys as three private pieces: Postgres, the Vercel Next.js app, and one serialized Fly worker. Never put credential values in source files, build arguments, deployment archives, or command output.
 
-1. Provision Postgres and store its pooled `DATABASE_URL` in Vercel and Fly secret stores.
+1. Provision Postgres (production uses AWS RDS `threadline-db` in `us-west-1`, TLS required) and store its `DATABASE_URL` (with `sslmode=require`) in Vercel and Fly secret stores.
 2. Apply checked-in migrations with `pnpm db:migrate` against the production database before serving traffic.
 3. Configure Vercel secrets for `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_URL`, `OWNER_EMAIL`, `DATABASE_URL`, `INTEGRATION_ENCRYPTION_KEY`, `INTEGRATION_ENCRYPTION_KEY_VERSION`, `CRON_SECRET`, `GMAIL_OAUTH_REDIRECT_URI`, and optional `LINKED_API_BASE_URL`.
 4. Register the exact Google callbacks for Auth.js and Gmail OAuth at `https://threadline.viraat.dev/api/auth/callback/google` and `https://threadline.viraat.dev/api/integrations/gmail/callback`.

@@ -1,13 +1,13 @@
 import { after } from "next/server";
 
+import { GMAIL_BACKFILL_TARGET_DAYS } from "@/src/integrations/gmail/constants";
 import type { UnifiedSyncSummary } from "@/src/sync/types";
 
 // Safety ceiling on how many times a single trigger may self-chain. Each link
 // advances the backfill by one soft-budget window, so this is far above what any
 // mailbox needs; it only exists to bound a pathological loop.
 const MAX_BACKFILL_CHAIN = 400;
-const BACKFILL_QUERY =
-  "gmailForceBackfill=1&gmailBackfillDays=3650&channels=gmail";
+export const BACKFILL_QUERY = `gmailForceBackfill=1&gmailBackfillDays=${GMAIL_BACKFILL_TARGET_DAYS}&channels=gmail`;
 
 export function readChainCount(url: URL): number {
   const raw = url.searchParams.get("_chain");
@@ -18,8 +18,7 @@ export function readChainCount(url: URL): number {
 export function gmailBackfillPending(summary: UnifiedSyncSummary): boolean {
   return summary.outcomes.some(
     (outcome) =>
-      outcome.channel === "gmail" &&
-      outcome.metadata?.backfillPending === true,
+      outcome.channel === "gmail" && outcome.metadata?.backfillPending === true,
   );
 }
 

@@ -38,3 +38,7 @@ next-env.d.ts
 *.sqlite3
 data/
 exports/
+.rudder-workspaces/
+
+# ledger local session journal and visualizations (never commit — may contain prompts/keys)
+.ledger/

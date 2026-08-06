@@ -27,6 +27,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // click or the daily cron) resumes from the saved watermark. The margin below
 // the cap must exceed the time a single page can take to fetch and persist.
 const BACKFILL_SOFT_BUDGET_MS = 120_000;
+// Threads per backfill page. Each thread costs a Gmail fetch plus several
+// database round trips, ~2s in prod, and the watermark only advances after a
+// whole page. 100-thread pages ran ~200s and tripped the orchestrator's 240s
+// cap with nothing checkpointed (2026-09-09); 25 keeps every page well inside
+// the soft budget so a stop always lands on a durable checkpoint.
+const BACKFILL_PAGE_SIZE = 25;
 
 interface RunGmailSyncInput {
   account: GmailIntegrationAccountRecord;
@@ -56,7 +62,8 @@ export async function runGmailSync(
   const runKey = createIdempotencyKey(
     "gmail-sync",
     input.account.id,
-    cursorBefore?.historyId ?? (input.forceBackfill ? "force-backfill" : "initial"),
+    cursorBefore?.historyId ??
+      (input.forceBackfill ? "force-backfill" : "initial"),
     trigger,
     backfillDays,
   );
@@ -73,7 +80,9 @@ export async function runGmailSync(
     ownerEmail: input.ownerEmail,
   });
   let cursorAfter: GmailSyncCursor | null = null;
-  const mode: GmailSyncResult["mode"] = cursorBefore ? "incremental" : "initial";
+  const mode: GmailSyncResult["mode"] = cursorBefore
+    ? "incremental"
+    : "initial";
 
   try {
     // No incremental cursor → walk history in resumable windows. This covers
@@ -234,7 +243,7 @@ async function runWindowedBackfill(input: {
   // do — a forced re-run must not restart from "now".
   const alreadyComplete = Boolean(
     priorState?.done &&
-      new Date(priorState.targetSince).getTime() <= targetSince.getTime(),
+    new Date(priorState.targetSince).getTime() <= targetSince.getTime(),
   );
   // Otherwise resume the upper bound from the oldest instant already covered;
   // start at "now" on a fresh backfill. A prior state whose target is shallower
@@ -266,7 +275,7 @@ async function runWindowedBackfill(input: {
           resource: GMAIL_CURSOR_RESOURCE,
           since: targetSince,
           until: coverEnd,
-          limit: 100,
+          limit: BACKFILL_PAGE_SIZE,
         },
       )) {
         if (page.cursor && !pendingHistoryId) pendingHistoryId = page.cursor;

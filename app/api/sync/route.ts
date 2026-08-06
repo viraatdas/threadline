@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 }
 
 // Owner-triggerable via a plain browser link, e.g.
-// /api/sync?gmailForceBackfill=1&gmailBackfillDays=3650&channels=gmail
+// /api/sync?gmailForceBackfill=1&gmailBackfillDays=548&channels=gmail
 // Read-only ingestion only; owner-session gated like POST.
 export async function GET(request: Request) {
   const session = await auth();

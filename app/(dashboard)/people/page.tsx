@@ -12,6 +12,7 @@ import {
   moveRelationshipStage,
   restoreContact,
 } from "../workspace-actions";
+import { classifyProjectMatchesAction } from "../project-actions";
 
 export const metadata: Metadata = {
   title: "People",
@@ -84,6 +85,7 @@ export default async function PeoplePage({
             moveStageAction: moveRelationshipStage,
             archiveContactAction: archiveContact,
             restoreContactAction: restoreContact,
+            matchProjectAction: classifyProjectMatchesAction,
           })}
     />
   );
