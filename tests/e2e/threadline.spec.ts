@@ -22,6 +22,12 @@ test.describe("owner workspace", () => {
     page,
   }) => {
     await page.goto("/?demo=1");
+    await expect(page).toHaveURL(/\/people\?(?=.*demo=1)(?=.*view=board)/);
+    await expect(
+      page.getByRole("heading", { name: /relationships by stage/ }),
+    ).toBeVisible();
+
+    await page.goto("/overview?demo=1");
     await expect(
       page.getByRole("heading", { name: "Today’s relationship view" }),
     ).toBeVisible();

@@ -29,7 +29,7 @@ test.beforeEach(async ({ context }) => {
 test("renders the demo command center without overflow and keeps actions keyboard-safe", async ({
   page,
 }) => {
-  await page.goto("/?demo=1");
+  await page.goto("/overview?demo=1");
 
   await expect(
     page.getByRole("heading", { name: "Today’s relationship view" }),
