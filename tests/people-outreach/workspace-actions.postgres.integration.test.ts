@@ -89,7 +89,16 @@ describeDatabase("workspace server actions with Postgres", () => {
   });
 
   beforeAll(async () => {
-    await migrate(drizzle(sql), { migrationsFolder: "migrations" });
+    // Migrate on a throwaway connection: postgres.js caches type OIDs on the
+    // connection's first query, so a client that migrates the schema itself
+    // never learns the `channel` enum array type and hands back raw `{gmail}`
+    // strings instead of parsed arrays.
+    const migrationSql = postgres(databaseUrl!, { max: 1, prepare: false });
+    try {
+      await migrate(drizzle(migrationSql), { migrationsFolder: "migrations" });
+    } finally {
+      await migrationSql.end();
+    }
   });
 
   beforeEach(async () => {

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -48,13 +48,19 @@ describe("person detail workspace", () => {
     await user.click(
       within(dialog).getByRole("button", { name: "Save correction" }),
     );
-    expect(screen.getByText("VP, Product Partnerships")).toBeInTheDocument();
+    // Form actions resolve in a transition, so the corrected value lands after
+    // the click settles rather than synchronously with it.
+    await waitFor(() => {
+      expect(screen.getByText("VP, Product Partnerships")).toBeInTheDocument();
+    });
     expect(screen.getAllByText("User override").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Undo" }));
-    expect(
-      screen.getAllByText("Director, Product Partnerships").length,
-    ).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("Director, Product Partnerships").length,
+      ).toBeGreaterThan(0);
+    });
   });
 
   it("copies an internal suggestion and exposes no external message action", async () => {
