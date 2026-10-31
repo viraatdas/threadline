@@ -21,7 +21,8 @@ import {
   type SendOutcome,
 } from "@/lib/engine";
 import { ingest, upsertPerson, type IngestSummary } from "@/lib/ingest";
-import { browserCookiesSchema, LinkedinClient, workerConfig } from "@/lib/linkedin";
+import { LinkedinClient, workerConfig } from "@/lib/linkedin";
+import { linkedinLoginInputSchema } from "@/lib/linkedin-login";
 import { parseManualImport } from "@/lib/manual-import";
 import { findMacCiTeams } from "@/lib/sources/github";
 import { searchHackerNews } from "@/lib/sources/hn";
@@ -281,31 +282,36 @@ export async function saveSettingsAction(input: z.input<typeof settingsSchema>) 
   return run(() => saveSettings(settingsSchema.parse(input)), ["/settings"]);
 }
 
-// The owner pastes a cookie export (e.g. Cookie-Editor → Export → JSON on
-// linkedin.com); it goes straight to the worker and is never stored here.
-export async function importLinkedinCookiesAction(text: string) {
+function workerClient() {
+  const config = workerConfig();
+  if (!config) throw new Error("The browser worker isn't configured.");
+  return new LinkedinClient(config);
+}
+
+// The sign-in view: the owner signs in to LinkedIn inside the worker's own
+// browser (LinkedIn revokes sessions copied from another browser). Typed text
+// goes straight through to the worker; it is never stored or logged.
+export async function openLinkedinLoginAction() {
+  return run(() => workerClient().openLogin());
+}
+
+export async function linkedinLoginInputAction(events: unknown) {
+  return run(() => workerClient().loginInput(linkedinLoginInputSchema.parse(events)));
+}
+
+export async function finishLinkedinLoginAction() {
   return run(async () => {
-    const config = workerConfig();
-    if (!config) throw new Error("The browser worker isn't configured.");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(z.string().max(200_000).parse(text));
-    } catch {
-      throw new Error("That isn't a JSON cookie export. In Cookie-Editor on linkedin.com, choose Export → JSON.");
-    }
-    const cookies = browserCookiesSchema.parse(Array.isArray(parsed) ? parsed : (parsed as { cookies?: unknown } | null)?.cookies);
-    const result = await new LinkedinClient(config).importSession(cookies);
+    const result = await workerClient().finishLogin();
     if (!result.signedIn) throw new Error(result.detail);
-    return { signedIn: true };
   }, ["/settings"]);
 }
 
+export async function cancelLinkedinLoginAction() {
+  return run(() => workerClient().cancelLogin(), ["/settings"]);
+}
+
 export async function signOutLinkedinAction() {
-  return run(async () => {
-    const config = workerConfig();
-    if (!config) throw new Error("The browser worker isn't configured.");
-    await new LinkedinClient(config).signOut();
-  }, ["/settings"]);
+  return run(() => workerClient().signOut(), ["/settings"]);
 }
 
 export async function saveApiKeyAction(provider: "github" | "apollo", token: string) {

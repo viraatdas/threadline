@@ -48,10 +48,10 @@ Connect accounts in **Settings**:
 - **LinkedIn** — runs through our own [browser-use](https://github.com/browser-use/browser-use)
   worker (`browser/`, see below), whose browser goes out through your
   Tailscale exit node so LinkedIn sees your home connection. Set
-  `BROWSER_WORKER_URL` and `BROWSER_WORKER_TOKEN`, sign in to linkedin.com,
-  then paste a cookie export (Cookie-Editor → Export → JSON) into Settings, or
-  run `pnpm linkedin-login` on your Mac (needs `OUTBOUND_URL` + `IMPORT_TOKEN`
-  in `.env.local`). Do it again when Settings says LinkedIn is signed out.
+  `BROWSER_WORKER_URL` and `BROWSER_WORKER_TOKEN`, then in Settings click
+  **Sign in to LinkedIn** and sign in inside the worker's browser (a live view
+  of it appears; click Done once you see your feed). Do it again when Settings
+  says LinkedIn is signed out.
 - **GitHub token** — fine-grained, no extra permissions; enables workflow search.
 - **Apollo key** — optional; adds people search by domain and verified emails.
 

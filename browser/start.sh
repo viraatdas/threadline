@@ -22,8 +22,10 @@ if [ -n "${TS_AUTHKEY:-}" ] || [ -f "$TS_STATE/tailscaled.state" ]; then
   tailscale set --exit-node= >/dev/null 2>&1 || true
   if [ -n "${TS_EXIT_NODE:-}" ]; then
     # Keep it set: it may be offline at boot, and `tailscale set` can succeed
-    # before the netmap arrives and then not stick.
-    ( while true; do
+    # before the netmap arrives and then not stick. `set +e`: a failed attempt
+    # must not end the loop (the script's `set -e` would).
+    ( set +e
+      while true; do
         tailscale status --json 2>/dev/null | grep -q '"ExitNodeStatus"' \
           || tailscale set --exit-node="$TS_EXIT_NODE" --exit-node-allow-lan-access=false >/dev/null 2>&1
         sleep 30

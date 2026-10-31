@@ -1,6 +1,7 @@
 import { buildMime } from "@/lib/gmail";
 import { findResultSchema } from "@/lib/ingest";
-import { browserCookiesSchema, LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
+import { LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
+import { linkedinLoginInputSchema } from "@/lib/linkedin-login";
 import { parseManualImport } from "@/lib/manual-import";
 
 const decode = (raw: string) => Buffer.from(raw, "base64url").toString("utf8");
@@ -164,7 +165,7 @@ describe("LinkedinClient (browser worker)", () => {
     expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "runLost" });
   });
 
-  it("reads the worker's session, forwards cookies, and explains HTTP failures without bodies", async () => {
+  it("reads the worker's session, drives the sign-in view, and explains HTTP failures without bodies", async () => {
     respond({
       ok: true,
       busy: false,
@@ -173,11 +174,21 @@ describe("LinkedinClient (browser worker)", () => {
       linkedin: { signedIn: true, expiresAt: "2027-04-30T00:00:00Z", verifiedAt: "2026-10-31T05:00:00Z", lastCheck: "Signed in." },
     });
     expect((await client.status()).linkedin.signedIn).toBe(true);
-    respond({ signedIn: true, detail: "Signed in.", cookies: 1 });
-    expect(await client.importSession([{ name: "li_at", value: "v", domain: ".linkedin.com" }])).toMatchObject({ signedIn: true });
-    expect(calls[1]).toMatchObject({ url: "https://worker.test/session", init: { method: "PUT" } });
-    respond({ error: "No li_at cookie." }, 422);
-    await expect(client.importSession([])).rejects.toThrow("No li_at cookie.");
+    respond({ ok: true });
+    await client.openLogin();
+    expect(calls[1]).toMatchObject({ url: "https://worker.test/login", init: { method: "POST" } });
+    await client.loginInput([{ type: "text", text: "a" }]);
+    expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ events: [{ type: "text", text: "a" }] });
+    vi.stubGlobal("fetch", async () => new Response(new Uint8Array([0xff, 0xd8]), { headers: { "content-type": "image/jpeg", "x-page-host": "linkedin.com" } }));
+    const screen = await client.loginScreen();
+    expect(screen?.host).toBe("linkedin.com");
+    expect(screen?.image.byteLength).toBe(2);
+    respond({ error: "The page is loading." }, 503);
+    expect(await client.loginScreen()).toBeNull();
+    respond({ signedIn: false, detail: "LinkedIn isn't signed in yet." });
+    expect(await client.finishLogin()).toEqual({ signedIn: false, detail: "LinkedIn isn't signed in yet." });
+    respond({ error: "Your home connection (the Tailscale exit node) is offline." }, 422);
+    await expect(client.openLogin()).rejects.toThrow("home connection");
     respond({ detail: "secret task text echoed" }, 401);
     await expect(client.status()).rejects.toThrow("BROWSER_WORKER_TOKEN");
     respond({ detail: "secret task text echoed" }, 500);
@@ -185,17 +196,20 @@ describe("LinkedinClient (browser worker)", () => {
   });
 });
 
-describe("browserCookiesSchema", () => {
-  it("takes a Cookie-Editor export as-is and keeps only linkedin.com cookies", () => {
-    const parsed = browserCookiesSchema.parse([
-      { domain: ".www.linkedin.com", expirationDate: 1824773233.9, hostOnly: false, httpOnly: true, name: "li_at", path: "/", sameSite: "no_restriction", secure: true, session: false, storeId: null, value: "v" },
-      { domain: "www.linkedin.com", hostOnly: true, name: "g_state", path: "/", sameSite: null, secure: false, session: true, storeId: null, value: "{}" },
-      { domain: ".evillinkedin.com", name: "li_at", value: "x" },
-      { domain: ".google.com", name: "SID", value: "x" },
-    ]);
-    expect(parsed.map((cookie) => cookie.name)).toEqual(["li_at", "g_state"]);
-    expect(parsed[0]).toMatchObject({ expirationDate: 1824773233.9, sameSite: "no_restriction" });
-    expect(browserCookiesSchema.safeParse([]).success).toBe(false);
+describe("linkedinLoginInputSchema", () => {
+  it("passes clicks, text and editing keys, and nothing else", () => {
+    expect(
+      linkedinLoginInputSchema.safeParse([
+        { type: "down", x: 10, y: 20 },
+        { type: "up", x: 10, y: 20 },
+        { type: "text", text: "hunter2" },
+        { type: "key", key: "Enter" },
+        { type: "scroll", x: 0, y: 0, dy: -120 },
+      ]).success,
+    ).toBe(true);
+    for (const bad of [[], [{ type: "key", key: "F12" }], [{ type: "down", x: -1, y: 0 }], [{ type: "text", text: "" }], [{ type: "eval", code: "1" }]]) {
+      expect(linkedinLoginInputSchema.safeParse(bad).success).toBe(false);
+    }
   });
 });
 

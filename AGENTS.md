@@ -61,11 +61,10 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | `lib/queries.ts` | Read-side loaders for each page. |
 | `lib/store.ts` | Settings, runtime state, sealed connections, API keys (DB first, env fallback). |
 | `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), Campaigns, Settings; `actions.ts` holds every mutation. |
-| `app/api/` | Auth, `integrations/gmail/{connect,callback}`, `cron` (daily refresh), `import` (CLI push), `linkedin/session` (cookie handoff to the worker). |
-| `browser/` | The self-hosted LinkedIn browser: open-source browser-use + Chromium under Xvfb on Fly (`threadline-browser`). Starlette API (`/runs`, `/session`, `/status`), one run at a time, session cookies on a volume. Chromium exits only through Tailscale (SOCKS5 → the owner's exit node). Deploy with `fly deploy` from `browser/`. |
+| `app/api/` | Auth, `integrations/gmail/{connect,callback}`, `cron` (daily refresh), `import` (CLI push), `linkedin/login/screen` (frames of the worker's sign-in view, owner only). |
+| `browser/` | The self-hosted LinkedIn browser: open-source browser-use + Chromium under Xvfb on Fly (`threadline-browser`). Starlette API (`/runs`, `/status`, `/login*` sign-in view, `DELETE /session`), one run at a time, browser profile on a volume. Chromium exits only through Tailscale (SOCKS5 → the owner's exit node). Deploy with `fly deploy` from `browser/`. |
 | `components/` | One client component per page + `ui.tsx` primitives + `shell/`. |
 | `scripts/scout.ts` | Local CLI: `pnpm scout yc|yc-json|github|hn|x` using the owner's own `yc`/`gh`/`bird` logins, pushing to `/api/import`. |
-| `scripts/linkedin-login.ts` | `pnpm linkedin-login`: reads the owner's linkedin.com cookies from their Mac browser and hands them to the worker via `/api/linkedin/session`. |
 
 ## How a prospect moves
 
@@ -164,13 +163,16 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BRO
   its run id in `companies.metadata.linkedinSearchRun` for the next click.
 - The worker runs one LinkedIn task at a time (queue) and never logs task
   text, page content or cookies. If it restarts mid-run, that run fails with
-  "check LinkedIn before retrying" rather than replaying a send. LinkedIn
-  sessions are re-imported by pasting a cookie export in Settings (or
-  `pnpm linkedin-login`).
+  "check LinkedIn before retrying" rather than replaying a send.
+- The owner signs in to LinkedIn inside the worker's own browser: Settings
+  shows its screen (`components/linkedin-login.tsx`) and relays clicks and
+  keys (`linkedinLoginInputAction` → worker `/login/input`). Typed text is
+  never logged or stored. Don't bring back cookie import: LinkedIn cancelled
+  both sessions copied in from the owner's Mac (from Fly's IP and from home).
 - LinkedIn revoked the owner's session the first time it saw Fly's datacenter
   IP. The worker's browser therefore only goes out through Tailscale to the
   owner's exit node (`TS_EXIT_NODE`, an always-on home machine), and before
-  every run and session import it checks Tailscale reports that node online
+  every run and opening the sign-in view it checks Tailscale reports that node online
   and its public IP through the proxy differs from Fly's own; otherwise
   runs stay queued (failed after 24h). Never give the browser a direct route.
 

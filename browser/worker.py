@@ -1,7 +1,8 @@
 """Self-hosted browser-use worker for Outbound's LinkedIn actions.
 
 One Chromium (headful under Xvfb) with a persistent profile on the Fly volume,
-signed in with the owner's own LinkedIn cookies (PUT /session). Outbound posts
+which the owner signs in to LinkedIn themselves through the sign-in view
+(/login: screenshots out, their clicks and keys in). Outbound posts
 one narrowly worded task at a time (POST /runs) and polls GET /runs/{id}. Runs
 execute serially: one account, one browser. The browser's only way out is
 Tailscale's SOCKS5 proxy through the owner's exit node, so LinkedIn sees their
@@ -23,6 +24,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
 os.environ.setdefault("BROWSER_USE_CLOUD_SYNC", "false")
@@ -35,7 +37,7 @@ from browser_use.llm.openrouter.chat import ChatOpenRouter  # noqa: E402
 from pydantic import BaseModel, Field, create_model  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
 from starlette.requests import Request  # noqa: E402
-from starlette.responses import JSONResponse  # noqa: E402
+from starlette.responses import JSONResponse, Response  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 
 # Agent, CDP and event-bus logs carry page text and model output; only our own
@@ -148,7 +150,7 @@ def linkedin_session() -> dict[str, Any]:
 # ── Browser ───────────────────────────────────────────────────────────────────
 
 
-def new_session() -> BrowserSession:
+def new_session(allowed_domains: list[str] = ALLOWED_DOMAINS) -> BrowserSession:
     # A crashed Chromium leaves locks that make the next launch exit at once.
     for lock in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
         (PROFILE / lock).unlink(missing_ok=True)
@@ -158,7 +160,7 @@ def new_session() -> BrowserSession:
             headless=False,  # under Xvfb; headless Chrome is easier for LinkedIn to spot
             user_data_dir=str(PROFILE),
             storage_state=str(STATE),
-            allowed_domains=ALLOWED_DOMAINS,
+            allowed_domains=allowed_domains,
             **({"user_agent": USER_AGENT} if USER_AGENT else {}),
             proxy=ProxySettings(server=PROXY) if PROXY else None,
             # WebRTC would otherwise reveal the server's own IP around the proxy.
@@ -225,7 +227,7 @@ async def verify_login() -> tuple[bool, str]:
         except Exception:
             pass
     if any(part in url for part in ("/login", "/authwall", "/checkpoint", "/uas/")):
-        return False, "LinkedIn asked to sign in or verify. Sign in again in your browser, then import your cookies again."
+        return False, "LinkedIn asked to sign in or verify. Sign in again from Settings."
     if "/feed" in url:
         return True, "Signed in."
     return False, "LinkedIn didn't open the feed."
@@ -374,57 +376,234 @@ async def get_run(request: Request) -> JSONResponse:
     return JSONResponse({k: run.get(k) for k in ("id", "status", "output", "error", "steps", "createdAt", "startedAt", "finishedAt")})
 
 
-def to_storage_cookie(cookie: dict[str, Any]) -> dict[str, Any] | None:
-    name, value, domain = cookie.get("name"), cookie.get("value"), str(cookie.get("domain") or "")
-    host = domain.lstrip(".").lower()
-    if not isinstance(name, str) or not isinstance(value, str) or not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+# ── Sign-in view ──────────────────────────────────────────────────────────────
+# LinkedIn revokes sessions copied in from another browser, so the owner signs
+# in here instead: Settings shows screenshots of this browser and relays their
+# clicks and keys. Nothing typed is logged or kept. While open, the view holds
+# LOCK so no run shares the profile, and it closes itself after 10 idle minutes.
+
+LOGIN_IDLE_S = 600
+# Only the owner drives the view (no agent), so it may also reach Google for
+# accounts that sign in to LinkedIn with Google.
+LOGIN_DOMAINS = [*ALLOWED_DOMAINS, "https://accounts.google.com"]
+KEYS = {  # key → (code, windowsVirtualKeyCode, char text)
+    "Enter": ("Enter", 13, "\r"),
+    "Backspace": ("Backspace", 8, None),
+    "Tab": ("Tab", 9, None),
+    "Escape": ("Escape", 27, None),
+    "Delete": ("Delete", 46, None),
+    "ArrowLeft": ("ArrowLeft", 37, None),
+    "ArrowUp": ("ArrowUp", 38, None),
+    "ArrowRight": ("ArrowRight", 39, None),
+    "ArrowDown": ("ArrowDown", 40, None),
+}
+
+
+def parse_inputs(body: Any) -> list[dict[str, Any]] | None:
+    """The owner's clicks and keys from Settings, or None if anything is off."""
+    events = body.get("events") if isinstance(body, dict) else None
+    if not isinstance(events, list) or not 0 < len(events) <= 200:
         return None
-    # Accepts sweet-cookie / Playwright cookies and browser-extension exports
-    # (Cookie-Editor: `expirationDate`, sameSite "no_restriction").
-    same_site = {"no_restriction": "None", "none": "None", "strict": "Strict"}.get(str(cookie.get("sameSite") or "").lower(), "Lax")
-    expires = cookie.get("expires", cookie.get("expirationDate"))
-    return {
-        "name": name,
-        "value": value,
-        # Domain cookies keep the leading dot; host-only ones don't.
-        "domain": domain if cookie.get("hostOnly") or domain.startswith(".") else f".{domain}",
-        "path": cookie.get("path") or "/",
-        "expires": float(expires) if isinstance(expires, (int, float)) else -1,
-        "httpOnly": bool(cookie.get("httpOnly")),
-        "secure": bool(cookie.get("secure", True)),
-        "sameSite": same_site,
-    }
+    parsed: list[dict[str, Any]] = []
+    for event in events:
+        kind = event.get("type") if isinstance(event, dict) else None
+        if kind in ("down", "up", "move", "scroll"):
+            x, y = event.get("x"), event.get("y")
+            if not all(isinstance(v, (int, float)) and 0 <= v <= 4000 for v in (x, y)):
+                return None
+            item: dict[str, Any] = {"type": kind, "x": float(x), "y": float(y)}
+            if kind == "scroll":
+                dy = event.get("dy")
+                if not isinstance(dy, (int, float)) or abs(dy) > 5000:
+                    return None
+                item["dy"] = float(dy)
+            parsed.append(item)
+        elif kind == "text" and isinstance(event.get("text"), str) and 0 < len(event["text"]) <= 1000:
+            parsed.append({"type": "text", "text": event["text"]})
+        elif kind == "key" and event.get("key") in KEYS:
+            parsed.append({"type": "key", "key": event["key"]})
+        else:
+            return None
+    return parsed
+
+
+class LoginView:
+    def __init__(self) -> None:
+        self.session: BrowserSession | None = None
+        self.holding = False
+        self.touched = 0.0
+        self.expiry: asyncio.Task | None = None
+
+    @property
+    def open(self) -> bool:
+        return self.session is not None
+
+    def touch(self) -> None:
+        self.touched = time.monotonic()
+
+    async def start(self) -> None:
+        await LOCK.acquire()
+        self.holding = True
+        try:
+            # A fresh profile so nothing from an older login lingers.
+            shutil.rmtree(PROFILE, ignore_errors=True)
+            PROFILE.mkdir(parents=True, exist_ok=True)
+            _write_json(STATE, {"cookies": [], "origins": []})
+            STATUS.unlink(missing_ok=True)
+            self.session = new_session(LOGIN_DOMAINS)
+            await self.session.start()
+            await self.session.navigate_to("https://www.linkedin.com/login")
+        except Exception:
+            await self.close()
+            raise
+        self.touch()
+        self.expiry = asyncio.get_running_loop().create_task(self._expire())
+
+    async def close(self) -> None:
+        session, self.session = self.session, None
+        if self.expiry and self.expiry is not asyncio.current_task():
+            self.expiry.cancel()
+        self.expiry = None
+        if session:
+            try:
+                await session.kill()  # writes the new session's cookies to STATE
+            except Exception:
+                pass
+        if self.holding:
+            self.holding = False
+            LOCK.release()
+
+    async def _expire(self) -> None:
+        while self.open:
+            await asyncio.sleep(15)
+            if time.monotonic() - self.touched > LOGIN_IDLE_S:
+                log.info("sign-in view closed after %ss idle", LOGIN_IDLE_S)
+                await self.close()
+
+    async def _focus(self):
+        # The newest tab, so a sign-in popup (Google) is what the owner sees.
+        assert self.session
+        target = await self.session.get_most_recently_opened_target_id()
+        return await self.session.get_or_create_cdp_session(target, focus=True)
+
+    async def screen(self) -> tuple[bytes, str]:
+        assert self.session
+        self.touch()
+        await self._focus()
+        image = await self.session.take_screenshot(format="jpeg", quality=60)
+        host = urlparse(await self.session.get_current_page_url()).hostname or ""
+        return image, host.removeprefix("www.")
+
+    async def input(self, events: list[dict[str, Any]]) -> None:
+        self.touch()
+        cdp = await self._focus()
+
+        async def mouse(**params: Any) -> None:
+            # A JS dialog can stall input events; don't hang the request on it.
+            await asyncio.wait_for(cdp.cdp_client.send.Input.dispatchMouseEvent(params=params, session_id=cdp.session_id), 5)
+
+        async def key(**params: Any) -> None:
+            await asyncio.wait_for(cdp.cdp_client.send.Input.dispatchKeyEvent(params=params, session_id=cdp.session_id), 5)
+
+        for event in events:
+            kind = event["type"]
+            if kind == "down":
+                await mouse(type="mouseMoved", x=event["x"], y=event["y"])
+                await mouse(type="mousePressed", x=event["x"], y=event["y"], button="left", clickCount=1)
+            elif kind == "up":
+                await mouse(type="mouseReleased", x=event["x"], y=event["y"], button="left", clickCount=1)
+            elif kind == "move":
+                await mouse(type="mouseMoved", x=event["x"], y=event["y"])
+            elif kind == "scroll":
+                await mouse(type="mouseWheel", x=event["x"], y=event["y"], deltaX=0, deltaY=event["dy"])
+            elif kind == "text":
+                for char in event["text"]:
+                    await key(type="keyDown", key=char)
+                    await key(type="char", text=char)
+                    await key(type="keyUp", key=char)
+            else:
+                code, vk, text = KEYS[event["key"]]
+                await key(type="rawKeyDown", key=event["key"], code=code, windowsVirtualKeyCode=vk)
+                if text:
+                    await key(type="char", text=text)
+                await key(type="keyUp", key=event["key"], code=code, windowsVirtualKeyCode=vk)
+
+
+VIEW = LoginView()
+def no_view() -> JSONResponse:
+    return JSONResponse({"error": "The sign-in view isn't open. Open it again from Settings."}, status_code=422)
 
 
 @guard
-async def put_session(request: Request) -> JSONResponse:
-    body = await request.json()
-    raw = body.get("cookies") if isinstance(body, dict) else None
-    if not isinstance(raw, list) or len(raw) > 300:
-        return JSONResponse({"error": "cookies must be a list"}, status_code=422)
-    cookies = [c for c in (to_storage_cookie(item) for item in raw if isinstance(item, dict)) if c]
-    if not any(c["name"] == "li_at" for c in cookies):
-        return JSONResponse({"error": "No li_at cookie: sign in to LinkedIn in that browser first."}, status_code=422)
-    # Checking the login opens LinkedIn, so it needs the home route too.
+async def open_login(_: Request) -> JSONResponse:
+    if VIEW.open:
+        VIEW.touch()
+        return JSONResponse({"ok": True})
     online, detail = await home_route()
     if not online:
         return JSONResponse({"error": detail}, status_code=422)
-    async with LOCK:
-        # A fresh profile so nothing from an older login lingers.
-        shutil.rmtree(PROFILE, ignore_errors=True)
-        PROFILE.mkdir(parents=True, exist_ok=True)
-        _write_json(STATE, {"cookies": cookies, "origins": []})
-        try:
-            ok, detail = await verify_login()
-        except Exception as error:
-            ok, detail = False, f"Couldn't open LinkedIn: {type(error).__name__}"
+    if LOCK.locked():
+        return JSONResponse({"error": "The browser is busy with a LinkedIn action. Try again in a minute."}, status_code=422)
+    try:
+        await VIEW.start()
+    except Exception as error:
+        return JSONResponse({"error": f"Couldn't open the browser: {type(error).__name__}"}, status_code=422)
+    log.info("sign-in view opened")
+    return JSONResponse({"ok": True})
+
+
+@guard
+async def login_screen(_: Request) -> Response:
+    if not VIEW.open:
+        return no_view()
+    try:
+        image, host = await VIEW.screen()
+    except Exception:  # mid-navigation; the next poll gets it
+        return JSONResponse({"error": "The page is loading."}, status_code=503)
+    return Response(image, media_type="image/jpeg", headers={"cache-control": "no-store", "x-page-host": host})
+
+
+@guard
+async def login_input(request: Request) -> JSONResponse:
+    events = parse_inputs(await request.json())
+    if events is None:
+        return JSONResponse({"error": "Unrecognized input."}, status_code=422)
+    if not VIEW.open:
+        return no_view()
+    try:
+        await VIEW.input(events)
+    except Exception as error:
+        return JSONResponse({"error": f"Input failed: {type(error).__name__}"}, status_code=422)
+    return JSONResponse({"ok": True})
+
+
+@guard
+async def finish_login(_: Request) -> JSONResponse:
+    if not VIEW.open:
+        return no_view()
+    await VIEW.close()
+    if linkedin_session()["signedIn"]:
+        async with LOCK:
+            try:
+                ok, detail = await verify_login()
+            except Exception as error:
+                ok, detail = False, f"Couldn't open LinkedIn: {type(error).__name__}"
+    else:
+        ok, detail = False, "LinkedIn isn't signed in yet. Open the sign-in view again and finish signing in."
     _write_json(STATUS, {"verifiedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "detail": detail, "ok": ok})
-    log.info("session import: %s", "signed in" if ok else "not signed in")
-    return JSONResponse({"signedIn": ok, "detail": detail, "cookies": len(cookies)})
+    log.info("sign-in view finished: %s", "signed in" if ok else "not signed in")
+    return JSONResponse({"signedIn": ok, "detail": detail})
+
+
+@guard
+async def cancel_login(_: Request) -> JSONResponse:
+    await VIEW.close()
+    return JSONResponse({"ok": True})
 
 
 @guard
 async def delete_session(_: Request) -> JSONResponse:
+    await VIEW.close()
     async with LOCK:
         shutil.rmtree(PROFILE, ignore_errors=True)
         STATE.unlink(missing_ok=True)
@@ -466,8 +645,12 @@ app = Starlette(
         Route("/status", status),
         Route("/runs", create_run, methods=["POST"]),
         Route("/runs/{run_id}", get_run),
-        Route("/session", put_session, methods=["PUT", "POST"]),
         Route("/session", delete_session, methods=["DELETE"]),
+        Route("/login", open_login, methods=["POST"]),
+        Route("/login", cancel_login, methods=["DELETE"]),
+        Route("/login/screen", login_screen),
+        Route("/login/input", login_input, methods=["POST"]),
+        Route("/login/finish", finish_login, methods=["POST"]),
     ],
     lifespan=lifespan,
 )

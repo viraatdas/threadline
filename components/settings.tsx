@@ -4,13 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import {
-  disconnectAction,
-  importLinkedinCookiesAction,
-  saveApiKeyAction,
-  saveSettingsAction,
-  signOutLinkedinAction,
-} from "@/app/(app)/actions";
+import { disconnectAction, saveApiKeyAction, saveSettingsAction, signOutLinkedinAction } from "@/app/(app)/actions";
+import { LinkedinLogin } from "@/components/linkedin-login";
 import { Button, Field, Input, Section, Status, Textarea, relativeTime } from "@/components/ui";
 import type { Settings } from "@/lib/domain";
 import type { SettingsData } from "@/lib/queries";
@@ -46,7 +41,6 @@ function Connections({ data }: { data: SettingsData }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [keys, setKeys] = useState({ github: "", apollo: "" });
-  const [cookies, setCookies] = useState("");
 
   const act = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
     startTransition(async () => {
@@ -95,7 +89,7 @@ function Connections({ data }: { data: SettingsData }) {
               browser-use
             </a>{" "}
             worker (Fly app <code className="rounded bg-surface-subtle px-1">threadline-browser</code>): an AI agent drives a
-            Chromium signed in with your LinkedIn cookies, only on linkedin.com. Used for people search, connection requests,
+            Chromium you sign in to yourself, only on linkedin.com. Used for people search, connection requests,
             messages (each only after you click Send) and reading your inbox list for replies. LinkedIn may restrict accounts
             that automate, so keep the daily limit low.
           </p>
@@ -106,33 +100,21 @@ function Connections({ data }: { data: SettingsData }) {
               actions wait.
             </li>
             <li>
-              Sign in to LinkedIn in your browser, then on linkedin.com open the Cookie-Editor extension → Export → JSON and
-              paste it below (or run <code className="rounded bg-surface-subtle px-1">pnpm linkedin-login</code> on your Mac).
-              Your cookies go only to the worker, never into this app’s database.
+              Sign in inside the worker’s own browser: click Sign in to LinkedIn, then use the page that appears like a
+              normal browser (paste works for your password; LinkedIn may ask for a code). Click Done once you see your
+              feed. LinkedIn cancels logins copied from another browser, so this is the way in.
             </li>
           </ol>
-          <form
-            className="mt-3 space-y-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              act(() => importLinkedinCookiesAction(cookies), "LinkedIn signed in on the worker");
-              setCookies("");
-            }}
-          >
-            <Textarea
-              rows={3}
-              autoComplete="off"
-              spellCheck={false}
-              value={cookies}
-              onChange={(event) => setCookies(event.target.value)}
-              placeholder="Paste the LinkedIn cookie export (JSON)"
-              aria-label="LinkedIn cookie export"
-              className="font-mono text-[12px]"
+          <div className="mt-3">
+            <LinkedinLogin
+              signedIn={data.linkedin.state === "signed_in"}
+              disabled={
+                pending ||
+                !(data.linkedin.state === "signed_in" || data.linkedin.state === "signed_out") ||
+                data.linkedin.home?.online === false
+              }
             />
-            <Button type="submit" size="sm" variant="primary" disabled={pending || cookies.trim().length < 20}>
-              Import cookies
-            </Button>
-          </form>
+          </div>
           {data.linkedin.state === "signed_in" || data.linkedin.state === "signed_out" ? (
             <Button
               size="sm"

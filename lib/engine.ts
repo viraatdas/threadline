@@ -592,7 +592,7 @@ export async function sendMessage(
 
     if (!person.linkedinUrl) return fail("No LinkedIn profile URL.");
     const client = await LinkedinClient.load();
-    if (!client) return fail("LinkedIn isn't signed in on the browser worker. Import your LinkedIn cookies in Settings.");
+    if (!client) return fail("LinkedIn isn't signed in on the browser worker. Sign in to LinkedIn in Settings.");
     const workflowId =
       message.channel === "linkedin_invite"
         ? await client.startConnectionRequest(person.linkedinUrl, message.body.slice(0, settings.inviteNoteLimit))

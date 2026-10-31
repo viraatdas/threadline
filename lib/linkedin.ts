@@ -2,13 +2,13 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { LinkedinLoginInput } from "@/lib/linkedin-login";
 import type { FoundPerson } from "@/lib/sources/types";
 
 // LinkedIn runs through our own browser-use worker (browser/, Fly app
-// `threadline-browser`): an AI agent drives a Chromium signed in with the
-// owner's own LinkedIn cookies, imported from their Mac by `pnpm
-// linkedin-login`. Every run is one narrow task; runs are async (start →
-// poll), like any queued send.
+// `threadline-browser`): an AI agent drives a Chromium the owner signed in to
+// themselves through the worker's sign-in view (Settings). Every run is one
+// narrow task; runs are async (start → poll), like any queued send.
 export interface WorkerConfig {
   url: string;
   token: string;
@@ -34,28 +34,6 @@ const workerStatusSchema = z.object({
   home: z.object({ online: z.boolean(), detail: z.string() }).optional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;
-
-// Cookies from `pnpm linkedin-login` (sweet-cookie) or pasted from a browser
-// extension export (Cookie-Editor: `expirationDate`, sameSite
-// "no_restriction"). Only linkedin.com ones are kept; the worker normalizes.
-export const browserCookiesSchema = z
-  .array(
-    z.object({
-      name: z.string().min(1).max(200),
-      value: z.string().max(8192),
-      domain: z.string().max(253).optional(),
-      hostOnly: z.boolean().optional(),
-      path: z.string().max(1024).optional(),
-      expires: z.number().optional(),
-      expirationDate: z.number().optional(),
-      secure: z.boolean().optional(),
-      httpOnly: z.boolean().optional(),
-      sameSite: z.string().max(20).nullish(),
-    }),
-  )
-  .min(1)
-  .max(300)
-  .transform((cookies) => cookies.filter((cookie) => /(^|\.)linkedin\.com$/i.test((cookie.domain ?? "").replace(/^\./, ""))));
 
 export class LinkedinError extends Error {
   constructor(
@@ -83,7 +61,7 @@ const SEND_OUTCOMES = {
   already_pending: ["alreadyPending", "An invitation is already pending."],
   not_connected: ["notConnected", "Not connected yet, so LinkedIn won't allow a message."],
   not_found: ["notFound", "That LinkedIn profile couldn't be opened."],
-  logged_out: ["loggedOut", "The LinkedIn session expired. Sign in to LinkedIn in your browser and import your cookies again in Settings."],
+  logged_out: ["loggedOut", "The LinkedIn session expired. Sign in to LinkedIn again in Settings."],
   blocked: ["blocked", "LinkedIn showed a security check or a limit."],
   failed: ["actionFailed", "The LinkedIn action didn't complete."],
 } as const satisfies Record<string, readonly [string, string] | null>;
@@ -162,11 +140,33 @@ export class LinkedinClient {
     return workerStatusSchema.parse(await this.call("/status", "GET", undefined, 5_000));
   }
 
-  /** Hand the worker the owner's LinkedIn cookies; it opens the feed to check them. */
-  async importSession(cookies: unknown[]): Promise<{ signedIn: boolean; detail: string }> {
-    return z
-      .object({ signedIn: z.boolean(), detail: z.string() })
-      .parse(await this.call("/session", "PUT", { cookies }, 90_000));
+  /** Opens LinkedIn's sign-in page in the worker's browser for the owner to drive. */
+  async openLogin(): Promise<void> {
+    await this.call("/login", "POST", {}, 90_000);
+  }
+
+  /** A JPEG of the sign-in view, or null while the page is between loads. */
+  async loginScreen(): Promise<{ image: ArrayBuffer; host: string } | null> {
+    try {
+      const response = await this.request("/login/screen", "GET", undefined, 15_000);
+      return { image: await response.arrayBuffer(), host: response.headers.get("x-page-host") ?? "" };
+    } catch (error) {
+      if (error instanceof LinkedinError && error.status === 503) return null;
+      throw error;
+    }
+  }
+
+  async loginInput(events: LinkedinLoginInput[]): Promise<void> {
+    await this.call("/login/input", "POST", { events }, 30_000);
+  }
+
+  /** Closes the view and checks the new session by opening the feed. */
+  async finishLogin(): Promise<{ signedIn: boolean; detail: string }> {
+    return z.object({ signedIn: z.boolean(), detail: z.string() }).parse(await this.call("/login/finish", "POST", {}, 90_000));
+  }
+
+  async cancelLogin(): Promise<void> {
+    await this.call("/login", "DELETE");
   }
 
   async signOut(): Promise<void> {
@@ -290,7 +290,11 @@ export class LinkedinClient {
     return state;
   }
 
-  private async call(path: string, method: "GET" | "POST" | "PUT" | "DELETE", body?: unknown, timeoutMs = 20_000): Promise<unknown> {
+  private async call(path: string, method: "GET" | "POST" | "DELETE", body?: unknown, timeoutMs = 20_000): Promise<unknown> {
+    return (await this.request(path, method, body, timeoutMs)).json();
+  }
+
+  private async request(path: string, method: "GET" | "POST" | "DELETE", body?: unknown, timeoutMs = 20_000): Promise<Response> {
     const response = await fetch(`${this.config.url}${path}`, {
       method,
       headers: { "content-type": "application/json", authorization: `Bearer ${this.config.token}` },
@@ -313,7 +317,7 @@ export class LinkedinClient {
         response.status,
       );
     }
-    return response.json();
+    return response;
   }
 }
 

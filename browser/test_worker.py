@@ -41,26 +41,59 @@ def test_model_from_schema_builds_enums_and_nested_arrays():
         Send.model_validate({"outcome": "maybe", "detail": ""})
 
 
-def test_cookie_conversion_keeps_only_linkedin():
-    assert worker.to_storage_cookie({"name": "x", "value": "1", "domain": "evil.com"}) is None
-    assert worker.to_storage_cookie({"name": "x", "value": "1", "domain": "evillinkedin.com"}) is None
-    # Cookie-Editor's export shape.
-    exported = worker.to_storage_cookie(
-        {"name": "li_at", "value": "v", "domain": ".www.linkedin.com", "expirationDate": 1824773233.9, "sameSite": "no_restriction", "secure": True, "session": False, "storeId": None}
-    )
-    assert exported is not None and exported["expires"] == 1824773233.9 and exported["sameSite"] == "None"
-    assert worker.to_storage_cookie({"name": "g", "value": "1", "domain": "www.linkedin.com", "hostOnly": True, "sameSite": None})["sameSite"] == "Lax"
-    cookie = worker.to_storage_cookie({"name": "li_at", "value": "v", "domain": "linkedin.com", "expires": 2_000_000_000, "httpOnly": True, "sameSite": "none"})
-    assert cookie == {
-        "name": "li_at",
-        "value": "v",
-        "domain": ".linkedin.com",
-        "path": "/",
-        "expires": 2_000_000_000.0,
-        "httpOnly": True,
-        "secure": True,
-        "sameSite": "None",
-    }
+class FakeBrowser:
+    """Stands in for BrowserSession in the sign-in view; signing in = li_at on kill."""
+
+    def __init__(self, allowed_domains=None):
+        self.allowed_domains = allowed_domains
+        self.sent: list[tuple[str, dict]] = []
+        outer = self
+
+        class Input:
+            async def dispatchMouseEvent(self, params, session_id):
+                outer.sent.append(("mouse", params))
+
+            async def dispatchKeyEvent(self, params, session_id):
+                outer.sent.append(("key", params))
+
+        self.cdp = type("Cdp", (), {"session_id": "s1", "cdp_client": type("C", (), {"send": type("S", (), {"Input": Input()})()})()})()
+
+    async def start(self):
+        pass
+
+    async def navigate_to(self, url):
+        self.url = url
+
+    async def get_most_recently_opened_target_id(self):
+        return "t1"
+
+    async def get_or_create_cdp_session(self, target_id=None, focus=True):
+        return self.cdp
+
+    async def take_screenshot(self, format="png", quality=None):
+        return b"\xff\xd8jpeg"
+
+    async def get_current_page_url(self):
+        return "https://www.linkedin.com/login"
+
+    async def kill(self):
+        worker._write_json(worker.STATE, {"cookies": [{"name": "li_at", "value": "v", "domain": ".www.linkedin.com", "expires": time.time() + 86400}]})
+
+
+def test_parse_inputs_accepts_only_known_events():
+    ok = worker.parse_inputs({"events": [{"type": "down", "x": 10, "y": 20}, {"type": "text", "text": "hi"}, {"type": "key", "key": "Enter"}, {"type": "scroll", "x": 1, "y": 1, "dy": -120}]})
+    assert ok == [{"type": "down", "x": 10.0, "y": 20.0}, {"type": "text", "text": "hi"}, {"type": "key", "key": "Enter"}, {"type": "scroll", "x": 1.0, "y": 1.0, "dy": -120.0}]
+    for bad in (
+        {"events": []},
+        {"events": [{"type": "key", "key": "F12"}]},
+        {"events": [{"type": "down", "x": -1, "y": 0}]},
+        {"events": [{"type": "down", "x": "1", "y": 0}]},
+        {"events": [{"type": "text", "text": "x" * 1001}]},
+        {"events": [{"type": "eval", "code": "1"}]},
+        {"events": [{"type": "text", "text": "a"}] * 201},
+        [],
+    ):
+        assert worker.parse_inputs(bad) is None
 
 
 def test_http_surface(monkeypatch):
@@ -77,9 +110,16 @@ def test_http_surface(monkeypatch):
     async def home(max_age=0):
         return True, "home"
 
+    browsers: list[FakeBrowser] = []
+
+    def fake_browser(allowed_domains=None):
+        browsers.append(FakeBrowser(allowed_domains))
+        return browsers[-1]
+
     monkeypatch.setattr(worker, "execute", fake_execute)
     monkeypatch.setattr(worker, "verify_login", fake_verify)
     monkeypatch.setattr(worker, "home_route", home)
+    monkeypatch.setattr(worker, "new_session", fake_browser)
 
     with TestClient(worker.app) as client:
         assert client.get("/healthz").json() == {"ok": True}
@@ -88,18 +128,35 @@ def test_http_surface(monkeypatch):
         assert client.post("/runs", json={"task": "x"}, headers={"Authorization": "Bearer wrong"}).status_code == 401
 
         assert client.get("/status", headers=AUTH).json()["linkedin"]["signedIn"] is False
-        rejected = client.put("/session", json={"cookies": [{"name": "JSESSIONID", "value": "a", "domain": "www.linkedin.com"}]}, headers=AUTH)
-        assert rejected.status_code == 422
-        imported = client.put(
-            "/session",
-            json={"cookies": [{"name": "li_at", "value": "v", "domain": "linkedin.com", "expires": time.time() + 86400}]},
+        assert client.get("/login/screen", headers=AUTH).status_code == 422
+        assert client.post("/login", headers=AUTH).json() == {"ok": True}
+        browser = browsers[-1]
+        assert "https://accounts.google.com" in browser.allowed_domains and browser.url == "https://www.linkedin.com/login"
+        screen = client.get("/login/screen", headers=AUTH)
+        assert screen.headers["content-type"] == "image/jpeg" and screen.headers["x-page-host"] == "linkedin.com"
+        typed = client.post(
+            "/login/input",
+            json={"events": [{"type": "down", "x": 5, "y": 6}, {"type": "up", "x": 5, "y": 6}, {"type": "text", "text": "ab"}, {"type": "key", "key": "Enter"}]},
             headers=AUTH,
         )
-        assert imported.json()["signedIn"] is True
-        assert client.get("/status", headers=AUTH).json()["linkedin"]["signedIn"] is True
+        assert typed.json() == {"ok": True}
+        assert [p["type"] for _, p in browser.sent] == [
+            "mouseMoved", "mousePressed", "mouseReleased",
+            "keyDown", "char", "keyUp", "keyDown", "char", "keyUp",
+            "rawKeyDown", "char", "keyUp",
+        ]
+        assert "".join(p["text"] for _, p in browser.sent if p["type"] == "char") == "ab\r"
+        assert client.post("/login/input", json={"events": [{"type": "key", "key": "F12"}]}, headers=AUTH).status_code == 422
 
+        # A run queued while the owner is signing in waits for the view to close.
         created = client.post("/runs", json={"task": "send it", "outputSchema": SEND_SCHEMA, "maxSteps": 500}, headers=AUTH).json()
         assert created["status"] == "queued"
+        time.sleep(0.1)
+        assert executed == []
+        finished = client.post("/login/finish", headers=AUTH).json()
+        assert finished == {"signedIn": True, "detail": "Signed in."}
+        assert client.get("/status", headers=AUTH).json()["linkedin"]["signedIn"] is True
+        assert client.post("/login/finish", headers=AUTH).status_code == 422
         for _ in range(50):
             run = client.get(f"/runs/{created['id']}", headers=AUTH).json()
             if run["status"] == "completed":
@@ -138,17 +195,16 @@ def test_runs_wait_for_the_home_connection(monkeypatch):
         run.update(status="completed", output={}, task=None)
         worker.save_run(run)
 
-    async def fake_verify():
+    def no_browser(allowed_domains=None):
         raise AssertionError("must not open LinkedIn off the home route")
 
     monkeypatch.setattr(worker, "home_route", home)
     monkeypatch.setattr(worker, "execute", fake_execute)
-    monkeypatch.setattr(worker, "verify_login", fake_verify)
+    monkeypatch.setattr(worker, "new_session", no_browser)
     monkeypatch.setattr(worker, "HOME_RETRY_S", 0.01)
 
     with TestClient(worker.app) as client:
-        cookie = [{"name": "li_at", "value": "v", "domain": ".linkedin.com"}]
-        refused = client.put("/session", json={"cookies": cookie}, headers=AUTH)
+        refused = client.post("/login", headers=AUTH)
         assert refused.status_code == 422 and refused.json()["error"] == "offline"
 
         created = client.post("/runs", json={"task": "send it"}, headers=AUTH).json()

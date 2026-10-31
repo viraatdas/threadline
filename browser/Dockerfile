@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium xvfb fonts-liberation fonts-noto-color-emoji ca-certificates curl tini \
+  && apt-get install -y --no-install-recommends chromium xvfb fonts-dejavu-core fonts-liberation fonts-noto-color-emoji ca-certificates curl tini \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --uid 1000 app
 
