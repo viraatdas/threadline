@@ -21,8 +21,13 @@ if [ -n "${TS_AUTHKEY:-}" ] || [ -f "$TS_STATE/tailscaled.state" ]; then
   # Only ever exit through TS_EXIT_NODE: drop whatever node the saved state had.
   tailscale set --exit-node= >/dev/null 2>&1 || true
   if [ -n "${TS_EXIT_NODE:-}" ]; then
-    # It may be offline at boot; keep trying until the exit node is set.
-    ( until tailscale set --exit-node="$TS_EXIT_NODE" --exit-node-allow-lan-access=false >/dev/null 2>&1; do sleep 30; done ) &
+    # Keep it set: it may be offline at boot, and `tailscale set` can succeed
+    # before the netmap arrives and then not stick.
+    ( while true; do
+        tailscale status --json 2>/dev/null | grep -q '"ExitNodeStatus"' \
+          || tailscale set --exit-node="$TS_EXIT_NODE" --exit-node-allow-lan-access=false >/dev/null 2>&1
+        sleep 30
+      done ) &
   fi
   BROWSER_PROXY=socks5://127.0.0.1:1055
 fi
