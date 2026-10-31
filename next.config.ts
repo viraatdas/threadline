@@ -10,7 +10,6 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  serverExternalPackages: ["@jtsang/bird"],
   async headers() {
     return [
       {

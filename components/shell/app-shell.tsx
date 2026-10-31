@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Toaster } from "sonner";
 
 import { MobileNav } from "@/components/shell/mobile-nav";
 import { Sidebar } from "@/components/shell/sidebar";
@@ -21,6 +22,7 @@ export function AppShell({ children, ownerEmail, ownerName }: AppShellProps) {
         </main>
       </div>
       <MobileNav />
+      <Toaster position="bottom-right" toastOptions={{ className: "text-[13px]" }} />
     </div>
   );
 }

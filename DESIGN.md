@@ -1,8 +1,8 @@
-# Threadline Design System
+# Outbound Design System
 
 ## Overview
 
-Threadline uses a restrained product interface built around a persistent navigation rail, a broad working canvas, and strong typographic hierarchy. The visual system should feel closer to an editor or research desk than a sales dashboard.
+Outbound uses a restrained product interface built around a persistent navigation rail, a broad working canvas, and strong typographic hierarchy. The visual system should feel closer to an editor or research desk than a sales dashboard — even though it is a sales tool.
 
 ## Principles
 
@@ -41,7 +41,7 @@ Use a single system sans stack: Inter when available, then `ui-sans-serif`, `-ap
 
 ## Layout
 
-- Desktop navigation rail: 232px.
+- Desktop navigation rail: 220px.
 - Content max width: 1440px, with 28–40px page gutters.
 - Primary pages use a title/action row, then divided sections or tables.
 - On narrow screens the rail becomes a compact top navigation; content retains 16px gutters.

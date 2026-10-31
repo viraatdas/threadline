@@ -19,14 +19,17 @@ export function Topbar({ ownerEmail, ownerName }: TopbarProps) {
         <BrandMark />
       </div>
 
-      <Link
-        href="/people"
-        className="hidden h-9 w-full max-w-[380px] items-center gap-2 rounded-[7px] border border-line bg-surface-raised px-3 text-left text-[13px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:flex"
-        aria-label="Search people and companies"
-      >
-        <Search className="size-4" strokeWidth={1.8} aria-hidden="true" />
-        Search people and companies
-      </Link>
+      <form action="/prospects" className="hidden w-full max-w-[380px] lg:block" role="search">
+        <label className="flex h-9 items-center gap-2 rounded-[7px] border border-line bg-surface-raised px-3 text-[13px] text-ink-muted focus-within:border-line-strong">
+          <Search className="size-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+          <span className="sr-only">Search prospects</span>
+          <input
+            name="q"
+            placeholder="Search companies"
+            className="h-full w-full bg-transparent text-ink outline-none placeholder:text-ink-faint"
+          />
+        </label>
+      </form>
 
       <div className="flex items-center gap-2.5">
         <div className="hidden text-right sm:block">

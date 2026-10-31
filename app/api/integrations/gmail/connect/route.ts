@@ -1,47 +1,23 @@
-import { randomBytes } from "node:crypto";
-
 import { NextRequest, NextResponse } from "next/server";
 
-import { EnvironmentCredentialVault } from "@/lib/security/credentials";
-import {
-  clampBackfillDays,
-  GMAIL_OAUTH_STATE_COOKIE,
-  GMAIL_OAUTH_STATE_MAX_AGE_SECONDS,
-} from "@/src/integrations/gmail/constants";
-import {
-  createGmailAuthorization,
-  gmailRedirectUri,
-  sanitizeReturnTo,
-} from "@/src/integrations/gmail/oauth";
-import {
-  getApiOwnerSession,
-  parseOptionalNumber,
-} from "@/app/api/integrations/gmail/_shared";
+import { auth, isOwnerSession } from "@/lib/auth";
+import { createAuthorization, GMAIL_STATE_COOKIE, gmailRedirectUri } from "@/lib/gmail";
 
 export async function GET(request: NextRequest) {
-  const session = await getApiOwnerSession();
-  const ownerEmail = session?.user?.email;
-  if (!ownerEmail)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const backfillDays = clampBackfillDays(
-    parseOptionalNumber(request.nextUrl.searchParams.get("backfillDays")),
-  );
-  const authorization = await createGmailAuthorization({
-    vault: new EnvironmentCredentialVault(),
+  const session = await auth();
+  if (!isOwnerSession(session)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { url, nonce } = createAuthorization({
     redirectUri: gmailRedirectUri(request.url),
-    ownerEmail,
-    nonce: randomBytes(24).toString("base64url"),
-    returnTo: sanitizeReturnTo(request.nextUrl.searchParams.get("returnTo")),
-    backfillDays,
-    now: new Date(),
+    returnTo: request.nextUrl.searchParams.get("returnTo") ?? "/settings",
+    ...(session.user?.email ? { loginHint: session.user.email } : {}),
   });
-  const response = NextResponse.redirect(authorization.authorizationUrl);
-  response.cookies.set(GMAIL_OAUTH_STATE_COOKIE, authorization.cookieValue, {
+  const response = NextResponse.redirect(url);
+  response.cookies.set(GMAIL_STATE_COOKIE, nonce, {
     httpOnly: true,
     sameSite: "lax",
     secure: request.nextUrl.protocol === "https:",
     path: "/api/integrations/gmail/callback",
-    maxAge: GMAIL_OAUTH_STATE_MAX_AGE_SECONDS,
+    maxAge: 600,
   });
   return response;
 }

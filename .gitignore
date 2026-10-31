@@ -42,3 +42,5 @@ exports/
 
 # ledger local session journal and visualizations (never commit — may contain prompts/keys)
 .ledger/
+.vercel
+.env*

@@ -8,10 +8,10 @@ import { requireOwner } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: {
-    default: "Threadline",
-    template: "%s · Threadline",
+    default: "Outbound",
+    template: "%s · Outbound",
   },
-  description: "A quiet relationship-intelligence workspace for thoughtful outreach.",
+  description: "Find teams that need Macs, research them, and run email + LinkedIn sequences you approve.",
   robots: {
     index: false,
     follow: false,

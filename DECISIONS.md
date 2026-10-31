@@ -173,3 +173,12 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
 - **Delivery:** deployed; web; target=https://threadline.viraat.dev; revision=803bccba0a65d827eec4bc3fa2acdbca277e0ba2 (main, pushed); verifiedAt=2026-09-09T23:32:00Z; checks=9
 - **By:** worker · 2026-09-09T23:32:35.172Z
 
+
+## 2026-10-31: Threadline → Outbound (for Offstage)
+- **Why:** The owner wanted a simple, Monaco-like outbound tool for selling Offstage (macOS sandboxes for agents/CI), not a read-only relationship mirror. "Remove the gunk."
+- **Removed:** Gmail/LinkedIn/X history sync and the 1.5-year self-chaining backfill, the sync orchestrator/coordinator/reconciler, X (bird cookies) integration, the Fly Codex analysis worker, the overview dashboard, board/people/outreach UIs, demo data, Playwright suites, googleapis/recharts/radix/etc. ~30k lines.
+- **Reversed invariant:** Threadline never sent anything. Outbound sends — but only one approved draft at a time from Today (`sendMessage` is the single send path; crons never send). Replies and bounces stop sequences; a reply is re-checked before every follow-up.
+- **New model (7 tables):** connections (sealed creds), settings, companies, people, signals, campaigns, messages. Migration `0001_outbound` drops the old tables; RDS snapshot `threadline-pre-outbound-2026-10-31` holds the old data.
+- **Sources:** YC directory (yc-oss) + YC company pages (founders + LinkedIn), the owner's `yc` CLI via `pnpm scout` or pasted JSON, GitHub Actions macOS/Xcode workflow search (account signal only — GitHub's AUP forbids emailing harvested addresses), Hacker News, pasted lists; optional Apollo for people/verified emails; Linked API for LinkedIn search/invites/messages. Clay not needed.
+- **AI:** OpenRouter (Haiku 5.5 research ≈ $0.0005/company, Sonnet 5.5 drafts); the Vercel AI Gateway free tier blocks Claude models.
+- **Kept:** Owner-only Google auth, AES-GCM credential vault, RDS + sfo1, the Gmail OAuth callback path (registered with Google).

@@ -35,8 +35,7 @@
     },
     "types": [
       "node",
-      "vitest/globals",
-      "@testing-library/jest-dom"
+      "vitest/globals"
     ],
     "noEmit": true
   },

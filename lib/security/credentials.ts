@@ -2,12 +2,10 @@ import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
-  timingSafeEqual,
 } from "node:crypto";
 
 import { z } from "zod";
 
-import type { CredentialVault } from "@/lib/domain/contracts";
 import { getEncryptionEnvironment } from "@/lib/security/env";
 
 const ALGORITHM = "aes-256-gcm";
@@ -95,21 +93,4 @@ export function openCredential<T>(
   ]);
 
   return JSON.parse(plaintext.toString("utf8")) as T;
-}
-
-export function credentialEnvelopesMatch(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-export class EnvironmentCredentialVault implements CredentialVault {
-  async seal(value: unknown, context: string): Promise<string> {
-    return sealCredential(value, context);
-  }
-
-  async open<T>(envelope: string, context: string): Promise<T> {
-    return openCredential<T>(envelope, context);
-  }
 }

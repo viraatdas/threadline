@@ -1,3 +1,2 @@
-export { closeDatabase, getDatabase, type ThreadlineDatabase } from "@/lib/db/client";
-export * from "@/lib/db/repositories";
+export { closeDatabase, getDatabase, type Database } from "@/lib/db/client";
 export * from "@/lib/db/schema";

@@ -12,3 +12,10 @@ export async function requireOwner() {
 
   return session;
 }
+
+// Server actions are public POST endpoints; every one starts here.
+export async function assertOwner() {
+  const session = await auth();
+  if (!isOwnerSession(session)) throw new Error("Unauthorized");
+  return session;
+}

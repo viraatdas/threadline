@@ -13,7 +13,7 @@ function createConnection(databaseUrl: string) {
     connect_timeout: 10,
     prepare: false,
     connection: {
-      application_name: "threadline-web",
+      application_name: "offstage-outbound",
       statement_timeout: 15_000,
       idle_in_transaction_session_timeout: 15_000,
     },
@@ -26,11 +26,11 @@ function createConnection(databaseUrl: string) {
 }
 
 type Connection = ReturnType<typeof createConnection>;
-export type ThreadlineDatabase = Connection["database"];
+export type Database = Connection["database"];
 
 let connection: Connection | undefined;
 
-export function getDatabase(): ThreadlineDatabase {
+export function getDatabase(): Database {
   connection ??= createConnection(getDatabaseEnvironment().DATABASE_URL);
   return connection.database;
 }

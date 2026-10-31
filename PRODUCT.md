@@ -1,47 +1,42 @@
 # Product
 
-## Register
+## What it is
 
-product
+Outbound is a private, single-owner tool for selling Offstage
+(https://offstage.cloud): pay-per-second macOS sandboxes for AI agents and
+macOS CI. It does the job of a small sales team — find accounts, research them,
+write personal first touches and follow-ups across email and LinkedIn — while
+the founder stays the one who decides what goes out.
 
-## Platform
+## Who it's for
 
-web
+One founder doing their own outbound. Not a team CRM: no seats, no pipelines,
+no quotas.
 
-## Users
+## The loop
 
-Threadline is a private, single-user workspace for its owner. The owner manages relationship-driven customer outreach across Gmail, LinkedIn, and X and needs a trustworthy memory of who was contacted, what happened, and what deserves attention next.
+Find → Research → Enroll → Approve → Reply.
 
-## Product Purpose
+- **Find** companies with evidence of Mac pain: GitHub workflows on macOS
+  runners, YC companies shipping Apple-platform apps or agents, Hacker News
+  launches, Bookface via the YC CLI, pasted lists.
+- **Research** reads their site and signals and scores fit 0–100 with a
+  one-line reason and a concrete hook.
+- **Enroll** the right people in a campaign (an angle plus a few email and
+  LinkedIn steps).
+- **Approve** each drafted message on Today — edit, send, skip, or rewrite.
+- **Reply** detection stops the sequence; the founder takes it from there.
 
-Threadline turns scattered, read-only communication history into a reliable relationship timeline. It identifies likely customer outreach, connects people to companies and roles, tracks replies and follow-ups, and lets the owner review AI-assisted conclusions without surrendering source evidence or manual control.
+## Principles
 
-Success means the owner can answer, at a glance: who should I contact, who have I contacted, when did I last reach out, how often have I tried, and did they reply?
+1. Evidence first: every company shows why it surfaced; every draft opens with
+   something specific and true.
+2. Human authority: AI drafts, the owner sends. Nothing leaves without a click.
+3. Small and legible: five pages, seven tables, one daily cron.
+4. Respect the recipient: low daily limits, stop on reply, no harvested GitHub
+   emails, unverified addresses flagged.
 
-## Positioning
+## Not doing (yet)
 
-Threadline is a quiet relationship-intelligence workspace, not a generic CRM: source-grounded memory and thoughtful follow-through without sales-pipeline theater.
-
-## Brand Personality
-
-Calm, discerning, and precise. The product should feel observant rather than intrusive, capable rather than performative, and private by default.
-
-## Anti-references
-
-- Generic CRM dashboards packed with interchangeable metric cards.
-- Loud sales tooling, gamified quotas, and pipeline-stage theater.
-- AI-branded purple, gradients, glowing effects, or magical black-box language.
-- Excessive pills, decorative charts, and ornamental motion.
-- Automation that sends, modifies, deletes, connects, posts, or replies on the owner's behalf.
-
-## Design Principles
-
-1. Preserve the thread: every conclusion should remain connected to source evidence and chronology.
-2. Attention over activity: prioritize the few relationships needing judgment instead of celebrating volume.
-3. Human authority: suggestions may be automated, but classifications and plans remain reviewable and overridable.
-4. Quiet confidence: dense information should be legible, restrained, and free of dashboard-card soup.
-5. Read-only trust: v1 observes and drafts; it never performs external communication actions.
-
-## Accessibility & Inclusion
-
-Meet WCAG 2.2 AA contrast and interaction expectations. Preserve visible focus states, full keyboard navigation, reduced-motion preferences, semantic landmarks, descriptive labels, and status cues that do not rely on color alone.
+Auto-send, open/click tracking, multi-user, Clay. Apollo is optional — useful
+for verified emails once volume justifies it.
