@@ -1,6 +1,6 @@
 import { buildMime } from "@/lib/gmail";
 import { findResultSchema } from "@/lib/ingest";
-import { LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
+import { browserCookiesSchema, LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
 import { parseManualImport } from "@/lib/manual-import";
 
 const decode = (raw: string) => Buffer.from(raw, "base64url").toString("utf8");
@@ -182,6 +182,20 @@ describe("LinkedinClient (browser worker)", () => {
     await expect(client.status()).rejects.toThrow("BROWSER_WORKER_TOKEN");
     respond({ detail: "secret task text echoed" }, 500);
     await expect(client.status()).rejects.toThrow("HTTP 500");
+  });
+});
+
+describe("browserCookiesSchema", () => {
+  it("takes a Cookie-Editor export as-is and keeps only linkedin.com cookies", () => {
+    const parsed = browserCookiesSchema.parse([
+      { domain: ".www.linkedin.com", expirationDate: 1824773233.9, hostOnly: false, httpOnly: true, name: "li_at", path: "/", sameSite: "no_restriction", secure: true, session: false, storeId: null, value: "v" },
+      { domain: "www.linkedin.com", hostOnly: true, name: "g_state", path: "/", sameSite: null, secure: false, session: true, storeId: null, value: "{}" },
+      { domain: ".evillinkedin.com", name: "li_at", value: "x" },
+      { domain: ".google.com", name: "SID", value: "x" },
+    ]);
+    expect(parsed.map((cookie) => cookie.name)).toEqual(["li_at", "g_state"]);
+    expect(parsed[0]).toMatchObject({ expirationDate: 1824773233.9, sameSite: "no_restriction" });
+    expect(browserCookiesSchema.safeParse([]).success).toBe(false);
   });
 });
 

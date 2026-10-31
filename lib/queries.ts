@@ -251,7 +251,14 @@ export async function sourceAvailability() {
 async function linkedinWorkerState(): Promise<
   | { state: "unconfigured" }
   | { state: "unreachable"; error: string }
-  | { state: "signed_in" | "signed_out"; expiresAt: string | null; verifiedAt: string | null; lastCheck: string | null; busy: boolean }
+  | {
+      state: "signed_in" | "signed_out";
+      expiresAt: string | null;
+      verifiedAt: string | null;
+      lastCheck: string | null;
+      busy: boolean;
+      home: { online: boolean; detail: string } | null;
+    }
 > {
   const config = workerConfig();
   if (!config) return { state: "unconfigured" };
@@ -263,6 +270,7 @@ async function linkedinWorkerState(): Promise<
       verifiedAt: status.linkedin.verifiedAt ?? null,
       lastCheck: status.linkedin.lastCheck ?? null,
       busy: Boolean(status.busy),
+      home: status.home ?? null,
     };
   } catch (error) {
     return { state: "unreachable", error: error instanceof Error ? error.message : "unreachable" };

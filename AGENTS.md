@@ -62,7 +62,7 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | `lib/store.ts` | Settings, runtime state, sealed connections, API keys (DB first, env fallback). |
 | `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), Campaigns, Settings; `actions.ts` holds every mutation. |
 | `app/api/` | Auth, `integrations/gmail/{connect,callback}`, `cron` (daily refresh), `import` (CLI push), `linkedin/session` (cookie handoff to the worker). |
-| `browser/` | The self-hosted LinkedIn browser: open-source browser-use + Chromium under Xvfb on Fly (`threadline-browser`). Starlette API (`/runs`, `/session`, `/status`), one run at a time, session cookies on a volume. Deploy with `fly deploy` from `browser/`. |
+| `browser/` | The self-hosted LinkedIn browser: open-source browser-use + Chromium under Xvfb on Fly (`threadline-browser`). Starlette API (`/runs`, `/session`, `/status`), one run at a time, session cookies on a volume. Chromium exits only through Tailscale (SOCKS5 → the owner's exit node). Deploy with `fly deploy` from `browser/`. |
 | `components/` | One client component per page + `ui.tsx` primitives + `shell/`. |
 | `scripts/scout.ts` | Local CLI: `pnpm scout yc|yc-json|github|hn|x` using the owner's own `yc`/`gh`/`bird` logins, pushing to `/api/import`. |
 | `scripts/linkedin-login.ts` | `pnpm linkedin-login`: reads the owner's linkedin.com cookies from their Mac browser and hands them to the worker via `/api/linkedin/session`. |
@@ -132,7 +132,8 @@ Env: `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_URL`,
 `OPENROUTER_API_KEY`; optional `GITHUB_TOKEN`, `APOLLO_API_KEY` (or paste them
 in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BROWSER_WORKER_TOKEN`
 (LinkedIn). The worker's own Fly secrets: `BROWSER_WORKER_TOKEN`,
-`OPENROUTER_API_KEY`; optional `BROWSER_MODEL`.
+`OPENROUTER_API_KEY`, `TS_AUTHKEY` (first boot only), `TS_EXIT_NODE`; optional
+`BROWSER_MODEL`.
 
 ## Gotchas
 
@@ -164,8 +165,13 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BRO
 - The worker runs one LinkedIn task at a time (queue) and never logs task
   text, page content or cookies. If it restarts mid-run, that run fails with
   "check LinkedIn before retrying" rather than replaying a send. LinkedIn
-  sessions expire or get challenged from the datacenter IP; Settings shows the
-  worker's last check, and `pnpm linkedin-login` re-imports cookies.
+  sessions are re-imported by pasting a cookie export in Settings (or
+  `pnpm linkedin-login`).
+- LinkedIn revoked the owner's session the first time it saw Fly's datacenter
+  IP. The worker's browser therefore only goes out through Tailscale to the
+  owner's exit node (their laptop), and before every run and session import
+  it checks its public IP through the proxy differs from Fly's own; otherwise
+  runs stay queued (failed after 24h). Never give the browser a direct route.
 
 ## Conventions
 

@@ -46,11 +46,12 @@ Connect accounts in **Settings**:
 - **Gmail** — OAuth with `gmail.send` + `gmail.readonly`. The Google OAuth
   client must allow `…/api/integrations/gmail/callback`.
 - **LinkedIn** — runs through our own [browser-use](https://github.com/browser-use/browser-use)
-  worker (`browser/`, see below). Set `BROWSER_WORKER_URL` and
-  `BROWSER_WORKER_TOKEN`, sign in to linkedin.com in Chrome (or Arc, Brave,
-  Safari, Firefox) on your Mac, then run `pnpm linkedin-login` (needs
-  `OUTBOUND_URL` + `IMPORT_TOKEN` in `.env.local`; macOS asks for Keychain
-  access once). Re-run it when Settings says LinkedIn is signed out.
+  worker (`browser/`, see below), whose browser goes out through your
+  Tailscale exit node so LinkedIn sees your home connection. Set
+  `BROWSER_WORKER_URL` and `BROWSER_WORKER_TOKEN`, sign in to linkedin.com,
+  then paste a cookie export (Cookie-Editor → Export → JSON) into Settings, or
+  run `pnpm linkedin-login` on your Mac (needs `OUTBOUND_URL` + `IMPORT_TOKEN`
+  in `.env.local`). Do it again when Settings says LinkedIn is signed out.
 - **GitHub token** — fine-grained, no extra permissions; enables workflow search.
 - **Apollo key** — optional; adds people search by domain and verified emails.
 
@@ -77,13 +78,20 @@ vercel deploy --prebuilt --prod --archive=tgz
 ### LinkedIn browser worker
 
 `browser/` is a small Python service (browser-use + Chromium under Xvfb) on
-Fly, app `threadline-browser`, with a 1 GB volume for the session. It needs
-two secrets: `BROWSER_WORKER_TOKEN` (the same value as the app's) and
-`OPENROUTER_API_KEY`.
+Fly, app `threadline-browser`, with a 1 GB volume for the session. Its browser
+only reaches the internet through Tailscale, via an exit node on your home
+network (your laptop: Tailscale menu → Exit Node → Run as exit node, then
+approve it in the admin console). While the exit node is offline, LinkedIn
+actions wait in the queue.
+
+Secrets: `BROWSER_WORKER_TOKEN` (the same value as the app's),
+`OPENROUTER_API_KEY`, `TS_AUTHKEY` (a one-off, pre-approved Tailscale auth key;
+only used on first boot, the node identity then lives on the volume) and
+`TS_EXIT_NODE` (the exit node's Tailscale name or IP).
 
 ```sh
 cd browser
-fly secrets set BROWSER_WORKER_TOKEN=… OPENROUTER_API_KEY=… -a threadline-browser
+fly secrets set BROWSER_WORKER_TOKEN=… OPENROUTER_API_KEY=… TS_AUTHKEY=… TS_EXIT_NODE=… -a threadline-browser
 fly deploy
 ```
 

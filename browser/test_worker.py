@@ -43,6 +43,13 @@ def test_model_from_schema_builds_enums_and_nested_arrays():
 
 def test_cookie_conversion_keeps_only_linkedin():
     assert worker.to_storage_cookie({"name": "x", "value": "1", "domain": "evil.com"}) is None
+    assert worker.to_storage_cookie({"name": "x", "value": "1", "domain": "evillinkedin.com"}) is None
+    # Cookie-Editor's export shape.
+    exported = worker.to_storage_cookie(
+        {"name": "li_at", "value": "v", "domain": ".www.linkedin.com", "expirationDate": 1824773233.9, "sameSite": "no_restriction", "secure": True, "session": False, "storeId": None}
+    )
+    assert exported is not None and exported["expires"] == 1824773233.9 and exported["sameSite"] == "None"
+    assert worker.to_storage_cookie({"name": "g", "value": "1", "domain": "www.linkedin.com", "hostOnly": True, "sameSite": None})["sameSite"] == "Lax"
     cookie = worker.to_storage_cookie({"name": "li_at", "value": "v", "domain": "linkedin.com", "expires": 2_000_000_000, "httpOnly": True, "sameSite": "none"})
     assert cookie == {
         "name": "li_at",
@@ -67,11 +74,16 @@ def test_http_surface(monkeypatch):
     async def fake_verify():
         return True, "Signed in."
 
+    async def home(max_age=0):
+        return True, "home"
+
     monkeypatch.setattr(worker, "execute", fake_execute)
     monkeypatch.setattr(worker, "verify_login", fake_verify)
+    monkeypatch.setattr(worker, "home_route", home)
 
     with TestClient(worker.app) as client:
         assert client.get("/healthz").json() == {"ok": True}
+        assert client.get("/status", headers=AUTH).json()["home"] == {"online": True, "detail": "home"}
         assert client.get("/status").status_code == 401
         assert client.post("/runs", json={"task": "x"}, headers={"Authorization": "Bearer wrong"}).status_code == 401
 
@@ -112,3 +124,68 @@ def test_restart_fails_interrupted_runs_and_requeues_waiting_ones():
     assert worker.load_run("aaaa-1")["status"] == "failed"
     assert worker.load_run("aaaa-1")["task"] is None
     assert worker.QUEUE.qsize() == 1
+
+
+def test_runs_wait_for_the_home_connection(monkeypatch):
+    online = {"value": False}
+    executed = []
+
+    async def home(max_age=0):
+        return online["value"], "home" if online["value"] else "offline"
+
+    async def fake_execute(run):
+        executed.append(run["id"])
+        run.update(status="completed", output={}, task=None)
+        worker.save_run(run)
+
+    async def fake_verify():
+        raise AssertionError("must not open LinkedIn off the home route")
+
+    monkeypatch.setattr(worker, "home_route", home)
+    monkeypatch.setattr(worker, "execute", fake_execute)
+    monkeypatch.setattr(worker, "verify_login", fake_verify)
+    monkeypatch.setattr(worker, "HOME_RETRY_S", 0.01)
+
+    with TestClient(worker.app) as client:
+        cookie = [{"name": "li_at", "value": "v", "domain": ".linkedin.com"}]
+        refused = client.put("/session", json={"cookies": cookie}, headers=AUTH)
+        assert refused.status_code == 422 and refused.json()["error"] == "offline"
+
+        created = client.post("/runs", json={"task": "send it"}, headers=AUTH).json()
+        time.sleep(0.1)
+        assert client.get(f"/runs/{created['id']}", headers=AUTH).json()["status"] == "queued"
+        assert executed == []
+        online["value"] = True
+        for _ in range(50):
+            if executed:
+                break
+            time.sleep(0.02)
+        assert executed == [created["id"]]
+
+
+def test_a_run_waiting_a_day_for_home_fails_without_running(monkeypatch):
+    async def offline(max_age=0):
+        return False, "offline"
+
+    monkeypatch.setattr(worker, "home_route", offline)
+    run = {"id": "bbbb-1", "status": "queued", "task": "t", "createdAt": time.time() - worker.QUEUE_TTL_S - 1}
+    worker.RUNS.mkdir(parents=True, exist_ok=True)
+    assert asyncio.run(worker.wait_for_home(run)) is False
+    saved = worker.load_run("bbbb-1")
+    assert saved["status"] == "failed" and saved["task"] is None
+
+
+def test_home_route_refuses_when_traffic_exits_from_the_server(monkeypatch):
+    async def same_ip(proxy=""):
+        return "203.0.113.7"
+
+    async def via_home(proxy=""):
+        return "198.51.100.2" if proxy else "203.0.113.7"
+
+    monkeypatch.setattr(worker, "PROXY", "socks5://127.0.0.1:1055")
+    monkeypatch.setattr(worker, "_public_ip", same_ip)
+    assert asyncio.run(worker.home_route())[0] is False
+    monkeypatch.setattr(worker, "_public_ip", via_home)
+    assert asyncio.run(worker.home_route())[0] is True
+    monkeypatch.setattr(worker, "PROXY", "")
+    assert asyncio.run(worker.home_route())[0] is False

@@ -4,7 +4,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { disconnectAction, saveApiKeyAction, saveSettingsAction, signOutLinkedinAction } from "@/app/(app)/actions";
+import {
+  disconnectAction,
+  importLinkedinCookiesAction,
+  saveApiKeyAction,
+  saveSettingsAction,
+  signOutLinkedinAction,
+} from "@/app/(app)/actions";
 import { Button, Field, Input, Section, Status, Textarea, relativeTime } from "@/components/ui";
 import type { Settings } from "@/lib/domain";
 import type { SettingsData } from "@/lib/queries";
@@ -40,6 +46,7 @@ function Connections({ data }: { data: SettingsData }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [keys, setKeys] = useState({ github: "", apollo: "" });
+  const [cookies, setCookies] = useState("");
 
   const act = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
     startTransition(async () => {
@@ -93,13 +100,38 @@ function Connections({ data }: { data: SettingsData }) {
             that automate, so keep the daily limit low.
           </p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13px] leading-5 text-ink-muted">
-            <li>Sign in to LinkedIn in Chrome (or Arc, Brave, Safari) on your Mac.</li>
             <li>
-              In this repo on your Mac, run the login. macOS may ask to let it read Chrome’s cookie key; allow it.
-              <pre className="mt-1 overflow-x-auto rounded-[8px] bg-surface-subtle px-3 py-2 text-[12px] leading-5">pnpm linkedin-login</pre>
+              Once: on your laptop, Tailscale menu → Exit Node → Run as exit node. The worker’s browser only goes out
+              through it, so LinkedIn sees your home connection; while the laptop sleeps, LinkedIn actions wait.
             </li>
-            <li>Re-run it whenever LinkedIn signs you out. Your cookies go only to the worker, never into this app’s database.</li>
+            <li>
+              Sign in to LinkedIn in your browser, then on linkedin.com open the Cookie-Editor extension → Export → JSON and
+              paste it below (or run <code className="rounded bg-surface-subtle px-1">pnpm linkedin-login</code> on your Mac).
+              Your cookies go only to the worker, never into this app’s database.
+            </li>
           </ol>
+          <form
+            className="mt-3 space-y-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              act(() => importLinkedinCookiesAction(cookies), "LinkedIn signed in on the worker");
+              setCookies("");
+            }}
+          >
+            <Textarea
+              rows={3}
+              autoComplete="off"
+              spellCheck={false}
+              value={cookies}
+              onChange={(event) => setCookies(event.target.value)}
+              placeholder="Paste the LinkedIn cookie export (JSON)"
+              aria-label="LinkedIn cookie export"
+              className="font-mono text-[12px]"
+            />
+            <Button type="submit" size="sm" variant="primary" disabled={pending || cookies.trim().length < 20}>
+              Import cookies
+            </Button>
+          </form>
           {data.linkedin.state === "signed_in" || data.linkedin.state === "signed_out" ? (
             <Button
               size="sm"
@@ -248,6 +280,7 @@ function LinkedinState({ linkedin }: { linkedin: SettingsData["linkedin"] }) {
         <div className="space-y-1">
           <Status tone="warning">not signed in</Status>
           {linkedin.lastCheck ? <p className="text-[12px] text-ink-muted">{linkedin.lastCheck}</p> : null}
+          <HomeState home={linkedin.home} />
         </div>
       );
     case "signed_in":
@@ -255,7 +288,18 @@ function LinkedinState({ linkedin }: { linkedin: SettingsData["linkedin"] }) {
         <div className="space-y-1">
           <Status tone="accent">signed in</Status>
           {linkedin.verifiedAt ? <p className="text-[12px] text-ink-muted">checked {relativeTime(linkedin.verifiedAt)}</p> : null}
+          <HomeState home={linkedin.home} />
         </div>
       );
   }
+}
+
+function HomeState({ home }: { home: { online: boolean; detail: string } | null }) {
+  if (!home) return null;
+  return (
+    <div className="space-y-1">
+      <Status tone={home.online ? "accent" : "warning"}>{home.online ? "home connection online" : "home connection offline"}</Status>
+      {home.online ? null : <p className="text-[12px] text-ink-muted">{home.detail}</p>}
+    </div>
+  );
 }

@@ -30,8 +30,32 @@ const workerStatusSchema = z.object({
     verifiedAt: z.string().nullish(),
     lastCheck: z.string().nullish(),
   }),
+  // Whether the worker's browser goes out through the owner's Tailscale exit node.
+  home: z.object({ online: z.boolean(), detail: z.string() }).optional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;
+
+// Cookies from `pnpm linkedin-login` (sweet-cookie) or pasted from a browser
+// extension export (Cookie-Editor: `expirationDate`, sameSite
+// "no_restriction"). Only linkedin.com ones are kept; the worker normalizes.
+export const browserCookiesSchema = z
+  .array(
+    z.object({
+      name: z.string().min(1).max(200),
+      value: z.string().max(8192),
+      domain: z.string().max(253).optional(),
+      hostOnly: z.boolean().optional(),
+      path: z.string().max(1024).optional(),
+      expires: z.number().optional(),
+      expirationDate: z.number().optional(),
+      secure: z.boolean().optional(),
+      httpOnly: z.boolean().optional(),
+      sameSite: z.string().max(20).nullish(),
+    }),
+  )
+  .min(1)
+  .max(300)
+  .transform((cookies) => cookies.filter((cookie) => /(^|\.)linkedin\.com$/i.test((cookie.domain ?? "").replace(/^\./, ""))));
 
 export class LinkedinError extends Error {
   constructor(
@@ -59,7 +83,7 @@ const SEND_OUTCOMES = {
   already_pending: ["alreadyPending", "An invitation is already pending."],
   not_connected: ["notConnected", "Not connected yet, so LinkedIn won't allow a message."],
   not_found: ["notFound", "That LinkedIn profile couldn't be opened."],
-  logged_out: ["loggedOut", "The LinkedIn session expired. Sign in to LinkedIn in your browser and re-run pnpm linkedin-login."],
+  logged_out: ["loggedOut", "The LinkedIn session expired. Sign in to LinkedIn in your browser and import your cookies again in Settings."],
   blocked: ["blocked", "LinkedIn showed a security check or a limit."],
   failed: ["actionFailed", "The LinkedIn action didn't complete."],
 } as const satisfies Record<string, readonly [string, string] | null>;

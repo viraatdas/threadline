@@ -7,6 +7,8 @@ primary_region = "sjc"
 
 [env]
   BROWSER_MODEL = "anthropic/claude-haiku-5.5"
+  # Matches the owner's home exit node, so the browser's clock agrees with its IP.
+  TZ = "America/Los_Angeles"
 
 [[mounts]]
   source = "browser_data"

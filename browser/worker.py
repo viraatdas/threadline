@@ -1,11 +1,12 @@
 """Self-hosted browser-use worker for Outbound's LinkedIn actions.
 
 One Chromium (headful under Xvfb) with a persistent profile on the Fly volume,
-signed in with the owner's own LinkedIn cookies (POST /session, fed by
-`pnpm linkedin-login` on their Mac). Outbound posts one narrowly worded task
-at a time (POST /runs) and polls GET /runs/{id}. Runs execute serially: one
-account, one browser. Task text, page content and agent output are never
-logged; only run ids and statuses are.
+signed in with the owner's own LinkedIn cookies (PUT /session). Outbound posts
+one narrowly worded task at a time (POST /runs) and polls GET /runs/{id}. Runs
+execute serially: one account, one browser. The browser's only way out is
+Tailscale's SOCKS5 proxy through the owner's exit node, so LinkedIn sees their
+home IP; while that's offline, runs wait. Task text, page content and agent
+output are never logged; only run ids and statuses are.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -28,6 +30,7 @@ os.environ.setdefault("BROWSER_USE_CLOUD_SYNC", "false")
 os.environ.setdefault("BROWSER_USE_SETUP_LOGGING", "false")
 
 from browser_use import Agent, BrowserProfile, BrowserSession  # noqa: E402
+from browser_use.browser.profile import ProxySettings  # noqa: E402
 from browser_use.llm.openrouter.chat import ChatOpenRouter  # noqa: E402
 from pydantic import BaseModel, Field, create_model  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
@@ -52,11 +55,15 @@ TOKEN = os.environ.get("BROWSER_WORKER_TOKEN", "")
 MODEL = os.environ.get("BROWSER_MODEL", "anthropic/claude-haiku-5.5")
 CHROME = os.environ.get("CHROME_PATH", "/usr/bin/chromium")
 SANDBOX = os.environ.get("CHROMIUM_SANDBOX", "true").lower() != "false"
-# Looks like the owner's Mac rather than a Linux server.
-USER_AGENT = os.environ.get(
-    "BROWSER_USER_AGENT",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
-)
+# Chromium's own user agent by default: a Mac UA on a Linux browser is exactly
+# the kind of mismatch bot checks look for.
+USER_AGENT = os.environ.get("BROWSER_USER_AGENT", "")
+# LinkedIn revoked a session the first time it saw Fly's datacenter IP, so the
+# browser only ever goes out through the owner's Tailscale exit node (set by
+# start.sh). Without it, nothing runs.
+PROXY = os.environ.get("BROWSER_PROXY", "")
+HOME_RETRY_S = 60
+QUEUE_TTL_S = 24 * 3600
 # The agent may only navigate LinkedIn, whatever a page tells it.
 ALLOWED_DOMAINS = ["https://linkedin.com", "https://*.linkedin.com"]
 RUN_TIMEOUT_S = int(os.environ.get("RUN_TIMEOUT_S", "300"))
@@ -152,7 +159,10 @@ def new_session() -> BrowserSession:
             user_data_dir=str(PROFILE),
             storage_state=str(STATE),
             allowed_domains=ALLOWED_DOMAINS,
-            user_agent=USER_AGENT,
+            **({"user_agent": USER_AGENT} if USER_AGENT else {}),
+            proxy=ProxySettings(server=PROXY) if PROXY else None,
+            # WebRTC would otherwise reveal the server's own IP around the proxy.
+            args=["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
             chromium_sandbox=SANDBOX,
             enable_default_extensions=False,
             keep_alive=False,
@@ -215,17 +225,65 @@ async def verify_login() -> tuple[bool, str]:
         except Exception:
             pass
     if any(part in url for part in ("/login", "/authwall", "/checkpoint", "/uas/")):
-        return False, "LinkedIn asked to sign in or verify. Sign in again in your browser, then re-run pnpm linkedin-login."
+        return False, "LinkedIn asked to sign in or verify. Sign in again in your browser, then import your cookies again."
     if "/feed" in url:
         return True, "Signed in."
     return False, "LinkedIn didn't open the feed."
+
+
+async def _public_ip(proxy: str = "") -> str | None:
+    args = ["curl", "-fsS", "--max-time", "10"]
+    if proxy:
+        args += ["--proxy", proxy.replace("socks5://", "socks5h://")]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args, "https://www.cloudflare.com/cdn-cgi/trace", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+        )
+        out, _ = await proc.communicate()
+    except OSError:
+        return None
+    match = re.search(r"^ip=([0-9a-fA-F.:]+)$", out.decode(errors="replace"), re.M)
+    return match.group(1) if proc.returncode == 0 and match else None
+
+
+_home_cache: tuple[float, bool, str] = (0.0, False, "")
+
+
+async def home_route(max_age: float = 0) -> tuple[bool, str]:
+    """Whether the browser's traffic leaves through the owner's home, never Fly's own IP."""
+    global _home_cache
+    if max_age and time.time() - _home_cache[0] < max_age:
+        return _home_cache[1], _home_cache[2]
+    if not PROXY:
+        result = (False, "No home connection is set up (Tailscale exit node).")
+    else:
+        home, direct = await asyncio.gather(_public_ip(PROXY), _public_ip())
+        if not home:
+            result = (False, "Your home connection (the Tailscale exit node) is offline. LinkedIn actions wait until it's back.")
+        elif home == direct:
+            result = (False, "Traffic isn't going through your home connection, so LinkedIn actions are paused.")
+        else:
+            result = (True, "LinkedIn traffic goes through your home connection.")
+    _home_cache = (time.time(), *result)
+    return result
+
+
+async def wait_for_home(run: dict[str, Any]) -> bool:
+    while not (await home_route())[0]:
+        if time.time() - run.get("createdAt", 0) > QUEUE_TTL_S:
+            run.update(status="failed", task=None, finishedAt=time.time(), error="Your home connection was offline for a day, so this never ran.")
+            save_run(run)
+            log.info("run %s failed (home offline)", run["id"])
+            return False
+        await asyncio.sleep(HOME_RETRY_S)
+    return True
 
 
 async def consumer() -> None:
     while True:
         run_id = await QUEUE.get()
         run = load_run(run_id)
-        if run and run.get("status") == "queued":
+        if run and run.get("status") == "queued" and await wait_for_home(run):
             async with LOCK:
                 await execute(run)
         QUEUE.task_done()
@@ -254,7 +312,17 @@ async def healthz(_: Request) -> JSONResponse:
 
 @guard
 async def status(_: Request) -> JSONResponse:
-    return JSONResponse({"ok": True, "busy": LOCK.locked(), "queued": QUEUE.qsize(), "model": MODEL, "linkedin": linkedin_session()})
+    online, detail = await home_route(max_age=30)
+    return JSONResponse(
+        {
+            "ok": True,
+            "busy": LOCK.locked(),
+            "queued": QUEUE.qsize(),
+            "model": MODEL,
+            "linkedin": linkedin_session(),
+            "home": {"online": online, "detail": detail},
+        }
+    )
 
 
 @guard
@@ -293,10 +361,13 @@ async def get_run(request: Request) -> JSONResponse:
 
 def to_storage_cookie(cookie: dict[str, Any]) -> dict[str, Any] | None:
     name, value, domain = cookie.get("name"), cookie.get("value"), str(cookie.get("domain") or "")
-    if not isinstance(name, str) or not isinstance(value, str) or not domain.lstrip(".").endswith("linkedin.com"):
+    host = domain.lstrip(".").lower()
+    if not isinstance(name, str) or not isinstance(value, str) or not (host == "linkedin.com" or host.endswith(".linkedin.com")):
         return None
-    same_site = str(cookie.get("sameSite") or "Lax").capitalize()
-    expires = cookie.get("expires")
+    # Accepts sweet-cookie / Playwright cookies and browser-extension exports
+    # (Cookie-Editor: `expirationDate`, sameSite "no_restriction").
+    same_site = {"no_restriction": "None", "none": "None", "strict": "Strict"}.get(str(cookie.get("sameSite") or "").lower(), "Lax")
+    expires = cookie.get("expires", cookie.get("expirationDate"))
     return {
         "name": name,
         "value": value,
@@ -306,7 +377,7 @@ def to_storage_cookie(cookie: dict[str, Any]) -> dict[str, Any] | None:
         "expires": float(expires) if isinstance(expires, (int, float)) else -1,
         "httpOnly": bool(cookie.get("httpOnly")),
         "secure": bool(cookie.get("secure", True)),
-        "sameSite": same_site if same_site in ("Lax", "Strict", "None") else "Lax",
+        "sameSite": same_site,
     }
 
 
@@ -319,6 +390,10 @@ async def put_session(request: Request) -> JSONResponse:
     cookies = [c for c in (to_storage_cookie(item) for item in raw if isinstance(item, dict)) if c]
     if not any(c["name"] == "li_at" for c in cookies):
         return JSONResponse({"error": "No li_at cookie: sign in to LinkedIn in that browser first."}, status_code=422)
+    # Checking the login opens LinkedIn, so it needs the home route too.
+    online, detail = await home_route()
+    if not online:
+        return JSONResponse({"error": detail}, status_code=422)
     async with LOCK:
         # A fresh profile so nothing from an older login lingers.
         shutil.rmtree(PROFILE, ignore_errors=True)
