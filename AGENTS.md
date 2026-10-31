@@ -174,10 +174,11 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BRO
   marks them read). The worker scrolls and reads the list itself (`prepare`
   recipe in `browser/worker.py`); the agent only reads it when that read looks
   wrong, e.g. after a LinkedIn markup change (see `prepared.classes` in the
-  run record) and matches replies by name; it runs at most every 4h (and
+  run record). Replies are matched by name. It runs at most every 4h (and
   daily regardless, for `runtime.linkedinConversations`). The cron waits for
   it; a manual refresh collects it on a later click. Each read is merged into
-  the saved list (newest first, up to 500); an empty read changes nothing. A person search that outlasts its wait leaves
+  the saved list (newest first, up to 500); an empty read changes nothing.
+  A person search that outlasts its wait leaves
   its run id in `companies.metadata.linkedinSearchRun` for the next click.
 - The worker runs one LinkedIn task at a time (queue) and never logs task
   text, page content or cookies. If it restarts mid-run, that run fails with
