@@ -5,6 +5,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } 
 import { getDatabase } from "@/lib/db/client";
 import { campaigns, companies, messages, people, signals } from "@/lib/db/schema";
 import { DEFAULT_CAMPAIGN, X_CAMPAIGN } from "@/lib/domain";
+import { LinkedinClient, workerConfig } from "@/lib/linkedin";
 import { listConnections, loadApiKey, loadRuntimeState, loadSettings } from "@/lib/store";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -209,20 +210,19 @@ export async function loadCampaignOptions() {
 }
 
 export async function loadSettingsData() {
-  const [settings, connections, runtime, github, apollo] = await Promise.all([
+  const [settings, connections, runtime, github, apollo, linkedin] = await Promise.all([
     loadSettings(),
     listConnections(),
     loadRuntimeState(),
     loadApiKey("github"),
     loadApiKey("apollo"),
+    linkedinWorkerState(),
   ]);
   return {
     settings,
     runtime,
     gmail: connections.gmail ? { label: connections.gmail.label, lastError: connections.gmail.lastError } : null,
-    linkedin: connections.linkedin
-      ? { label: connections.linkedin.label, lastError: connections.linkedin.lastError }
-      : null,
+    linkedin,
     keys: {
       github: github ? (connections.github ? "stored" : "env") : null,
       apollo: apollo ? (connections.apollo ? "stored" : "env") : null,
@@ -233,11 +233,38 @@ export async function loadSettingsData() {
 export type SettingsData = Awaited<ReturnType<typeof loadSettingsData>>;
 
 export async function sourceAvailability() {
-  const [connections, github, apollo] = await Promise.all([listConnections(), loadApiKey("github"), loadApiKey("apollo")]);
+  const [connections, github, apollo, linkedin] = await Promise.all([
+    listConnections(),
+    loadApiKey("github"),
+    loadApiKey("apollo"),
+    linkedinWorkerState(),
+  ]);
   return {
     github: Boolean(github),
     apollo: Boolean(apollo),
-    linkedin: Boolean(connections.linkedin),
+    linkedin: linkedin.state === "signed_in",
     gmail: Boolean(connections.gmail),
   };
+}
+
+// The worker is the source of truth for LinkedIn: it holds the session.
+async function linkedinWorkerState(): Promise<
+  | { state: "unconfigured" }
+  | { state: "unreachable"; error: string }
+  | { state: "signed_in" | "signed_out"; expiresAt: string | null; verifiedAt: string | null; lastCheck: string | null; busy: boolean }
+> {
+  const config = workerConfig();
+  if (!config) return { state: "unconfigured" };
+  try {
+    const status = await new LinkedinClient(config).status();
+    return {
+      state: status.linkedin.signedIn ? "signed_in" : "signed_out",
+      expiresAt: status.linkedin.expiresAt ?? null,
+      verifiedAt: status.linkedin.verifiedAt ?? null,
+      lastCheck: status.linkedin.lastCheck ?? null,
+      busy: Boolean(status.busy),
+    };
+  } catch (error) {
+    return { state: "unreachable", error: error instanceof Error ? error.message : "unreachable" };
+  }
 }

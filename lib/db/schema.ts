@@ -157,7 +157,7 @@ export const messages = pgTable(
     body: text("body").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
-    // Gmail message id or Browser Use run id; threadId groups follow-ups.
+    // Gmail message id or browser worker run id; threadId groups follow-ups.
     externalId: text("external_id"),
     threadId: text("thread_id"),
     error: text("error"),

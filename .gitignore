@@ -44,3 +44,5 @@ exports/
 .ledger/
 .vercel
 .env*
+
+__pycache__/

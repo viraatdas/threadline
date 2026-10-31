@@ -3,20 +3,35 @@ import "server-only";
 import { z } from "zod";
 
 import type { FoundPerson } from "@/lib/sources/types";
-import { loadConnection } from "@/lib/store";
 
-// LinkedIn runs through Browser Use Cloud (github.com/browser-use/browser-use):
-// an AI agent drives a cloud browser signed in with the owner's own LinkedIn
-// cookies, synced once from their Mac into a Browser Use profile. Every run is
-// one narrow task; runs are async (start → poll), like any queued send.
-const API = "https://api.browser-use.com/api/v4";
-const MODEL = process.env.BROWSER_USE_MODEL;
+// LinkedIn runs through our own browser-use worker (browser/, Fly app
+// `threadline-browser`): an AI agent drives a Chromium signed in with the
+// owner's own LinkedIn cookies, imported from their Mac by `pnpm
+// linkedin-login`. Every run is one narrow task; runs are async (start →
+// poll), like any queued send.
+export interface WorkerConfig {
+  url: string;
+  token: string;
+}
 
-export const linkedinCredentialsSchema = z.object({
-  apiKey: z.string().trim().min(8).max(200),
-  profileId: z.string().trim().uuid(),
+export function workerConfig(): WorkerConfig | null {
+  const url = process.env.BROWSER_WORKER_URL?.replace(/\/$/, "");
+  const token = process.env.BROWSER_WORKER_TOKEN;
+  return url && token ? { url, token } : null;
+}
+
+const workerStatusSchema = z.object({
+  busy: z.boolean().optional(),
+  queued: z.number().optional(),
+  model: z.string().optional(),
+  linkedin: z.object({
+    signedIn: z.boolean(),
+    expiresAt: z.string().nullish(),
+    verifiedAt: z.string().nullish(),
+    lastCheck: z.string().nullish(),
+  }),
 });
-export type LinkedinCredentials = z.infer<typeof linkedinCredentialsSchema>;
+export type WorkerStatus = z.infer<typeof workerStatusSchema>;
 
 export class LinkedinError extends Error {
   constructor(
@@ -44,7 +59,7 @@ const SEND_OUTCOMES = {
   already_pending: ["alreadyPending", "An invitation is already pending."],
   not_connected: ["notConnected", "Not connected yet, so LinkedIn won't allow a message."],
   not_found: ["notFound", "That LinkedIn profile couldn't be opened."],
-  logged_out: ["loggedOut", "The LinkedIn session expired. Re-run the Browser Use profile sync on your Mac."],
+  logged_out: ["loggedOut", "The LinkedIn session expired. Sign in to LinkedIn in your browser and re-run pnpm linkedin-login."],
   blocked: ["blocked", "LinkedIn showed a security check or a limit."],
   failed: ["actionFailed", "The LinkedIn action didn't complete."],
 } as const satisfies Record<string, readonly [string, string] | null>;
@@ -108,24 +123,30 @@ const RULES = [
 ].join("\n");
 
 export class LinkedinClient {
-  constructor(private readonly credentials: LinkedinCredentials) {}
+  constructor(private readonly config: WorkerConfig) {}
 
+  /** A client only when the worker is configured and signed in to LinkedIn. */
   static async load(): Promise<LinkedinClient | null> {
-    const connection = await loadConnection<unknown>("linkedin");
-    if (!connection) return null;
-    const parsed = linkedinCredentialsSchema.safeParse(connection.credentials);
-    return parsed.success ? new LinkedinClient(parsed.data) : null;
+    const config = workerConfig();
+    if (!config) return null;
+    const client = new LinkedinClient(config);
+    const status = await client.status().catch(() => null);
+    return status?.linkedin.signedIn ? client : null;
   }
 
-  /** The synced profile, to confirm the key works and it holds LinkedIn cookies. */
-  async profile(): Promise<{ name: string | null; hasLinkedin: boolean }> {
-    const result = z
-      .object({ name: z.string().nullish(), cookieDomains: z.array(z.string()).nullish() })
-      .parse(await this.call(`/profiles/${encodeURIComponent(this.credentials.profileId)}`, "GET"));
-    return {
-      name: result.name ?? null,
-      hasLinkedin: (result.cookieDomains ?? []).some((domain) => /(^|\.)linkedin\.com$/i.test(domain.replace(/^\./, ""))),
-    };
+  async status(): Promise<WorkerStatus> {
+    return workerStatusSchema.parse(await this.call("/status", "GET", undefined, 5_000));
+  }
+
+  /** Hand the worker the owner's LinkedIn cookies; it opens the feed to check them. */
+  async importSession(cookies: unknown[]): Promise<{ signedIn: boolean; detail: string }> {
+    return z
+      .object({ signedIn: z.boolean(), detail: z.string() })
+      .parse(await this.call("/session", "PUT", { cookies }, 90_000));
+  }
+
+  async signOut(): Promise<void> {
+    await this.call("/session", "DELETE");
   }
 
   startConnectionRequest(personUrl: string, note: string) {
@@ -142,7 +163,7 @@ export class LinkedinClient {
         "Report sent once LinkedIn confirms the invitation.",
       ].join("\n"),
       sendOutputSchema,
-      0.4,
+      20,
     );
   }
 
@@ -157,7 +178,7 @@ export class LinkedinClient {
         "Click Send once, then report sent. Do not send anything else in that conversation.",
       ].join("\n"),
       sendOutputSchema,
-      0.4,
+      20,
     );
   }
 
@@ -171,7 +192,7 @@ export class LinkedinClient {
         "For each, return their name, headline, profile URL (linkedin.com/in/…), and location. Do not connect with, message, or follow anyone.",
       ].join("\n"),
       searchOutputSchema,
-      0.6,
+      30,
     );
   }
 
@@ -185,41 +206,36 @@ export class LinkedinClient {
         "For the 25 most recent conversations, return the other person's name, whether the latest message is from them (not from the owner), the preview text shown, and the time shown.",
       ].join("\n"),
       inboxOutputSchema,
-      0.6,
+      20,
     );
   }
 
-  private async start(task: string, outputSchema: Record<string, unknown>, maxCostUsd: number): Promise<string> {
-    const result = z.object({ id: z.string().uuid() }).parse(
-      await this.call("/runs", "POST", {
-        task,
-        outputSchema,
-        maxCostUsd,
-        ...(MODEL ? { model: MODEL } : {}),
-        // A stable country keeps LinkedIn from seeing the session hop around.
-        browserSettings: { profileId: this.credentials.profileId, proxyCountryCode: "us" },
-      }),
-    );
+  private async start(task: string, outputSchema: Record<string, unknown>, maxSteps: number): Promise<string> {
+    const result = z.object({ id: z.string().uuid() }).parse(await this.call("/runs", "POST", { task, outputSchema, maxSteps }));
     return result.id;
   }
 
   async workflow(workflowId: string): Promise<WorkflowState> {
+    let raw: unknown;
+    try {
+      raw = await this.call(`/runs/${encodeURIComponent(workflowId)}`, "GET");
+    } catch (error) {
+      if (error instanceof LinkedinError && error.status === 404) {
+        return { status: "failed", workflowId, code: "runLost", message: "The browser worker has no record of this run. Check LinkedIn before retrying." };
+      }
+      throw error;
+    }
     const run = z
       .object({
-        status: z.enum(["queued", "dispatching", "running", "completed", "failed", "cancelled"]),
+        status: z.enum(["queued", "running", "completed", "failed"]),
         output: z.unknown().optional(),
         error: z.string().nullish(),
       })
-      .parse(await this.call(`/runs/${encodeURIComponent(workflowId)}`, "GET"));
-    if (run.status === "queued" || run.status === "dispatching") return { status: "pending", workflowId };
+      .parse(raw);
+    if (run.status === "queued") return { status: "pending", workflowId };
     if (run.status === "running") return { status: "running", workflowId };
-    if (run.status !== "completed") {
-      return {
-        status: "failed",
-        workflowId,
-        code: run.status === "cancelled" ? "cancelled" : "runFailed",
-        message: (run.error ?? `The Browser Use run ${run.status}.`).slice(0, 300),
-      };
+    if (run.status === "failed") {
+      return { status: "failed", workflowId, code: "runFailed", message: (run.error ?? "The browser run failed.").slice(0, 300) };
     }
     const output = typeof run.output === "string" ? safeJson(run.output) : run.output;
     const send = z.object({ outcome: z.string(), detail: z.string().optional() }).safeParse(output);
@@ -250,25 +266,26 @@ export class LinkedinClient {
     return state;
   }
 
-  private async call(path: string, method: "GET" | "POST", body?: unknown): Promise<unknown> {
-    const response = await fetch(`${API}${path}`, {
+  private async call(path: string, method: "GET" | "POST" | "PUT" | "DELETE", body?: unknown, timeoutMs = 20_000): Promise<unknown> {
+    const response = await fetch(`${this.config.url}${path}`, {
       method,
-      headers: { "content-type": "application/json", "X-Browser-Use-API-Key": this.credentials.apiKey },
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.config.token}` },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      // Status lines only: response bodies can echo the task text.
+      // The worker's own short error for validation failures; status lines otherwise.
+      const detail =
+        response.status === 422
+          ? z.object({ error: z.string().max(300) }).safeParse(await response.json().catch(() => null)).data?.error
+          : undefined;
       const messages: Record<number, string> = {
-        401: "Browser Use rejected the API key.",
-        402: "Browser Use is out of credits. Top up at cloud.browser-use.com.",
-        403: "Browser Use refused the request (check the project and Zero Data Retention setting).",
-        404: "Browser Use couldn't find that profile or run.",
-        429: "Browser Use is at its concurrent-session limit. Try again shortly.",
+        401: "The browser worker rejected our token (BROWSER_WORKER_TOKEN).",
+        404: "The browser worker couldn't find that run.",
       };
       throw new LinkedinError(
         `http${response.status}`,
-        messages[response.status] ?? `Browser Use request failed (HTTP ${response.status}).`,
+        detail ?? messages[response.status] ?? `Browser worker request failed (HTTP ${response.status}).`,
         response.status,
       );
     }

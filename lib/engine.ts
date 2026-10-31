@@ -17,7 +17,7 @@ import {
 import { LINKEDIN_CHANNELS, type Channel } from "@/lib/domain";
 import { GmailClient } from "@/lib/gmail";
 import { ingest, upsertPerson } from "@/lib/ingest";
-import { LinkedinClient, LinkedinError, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
+import { LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
 import { apolloFindPeople, apolloRevealEmail } from "@/lib/sources/apollo";
 import { domainAcceptsMail, guessEmail } from "@/lib/sources/email-guess";
 import { checkOrgForMacCi } from "@/lib/sources/github";
@@ -592,7 +592,7 @@ export async function sendMessage(
 
     if (!person.linkedinUrl) return fail("No LinkedIn profile URL.");
     const client = await LinkedinClient.load();
-    if (!client) return fail("Connect LinkedIn in Settings first.");
+    if (!client) return fail("LinkedIn isn't signed in on the browser worker. Run pnpm linkedin-login on your Mac (see Settings).");
     const workflowId =
       message.channel === "linkedin_invite"
         ? await client.startConnectionRequest(person.linkedinUrl, message.body.slice(0, settings.inviteNoteLimit))
@@ -603,7 +603,6 @@ export async function sendMessage(
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Send failed.";
     if (message.channel === "email") await recordConnectionError("gmail", detail);
-    else if (error instanceof LinkedinError && (error.status === 401 || error.status === 402)) await recordConnectionError("linkedin", detail);
     return fail(detail);
   }
 }
@@ -678,9 +677,6 @@ async function resolveLinkedinSend(message: Message, client: LinkedinClient, bud
       .where(eq(messages.id, message.id));
     if (campaign && message.step !== null) await advance(person, campaign, message.step, new Date());
     return { status: "skipped", detail: state.message };
-  }
-  if (state.code === "loggedOut" || state.code === "http401" || state.code === "http402") {
-    await recordConnectionError("linkedin", state.message);
   }
   await database
     .update(messages)
@@ -780,7 +776,6 @@ async function checkLinkedinReplies(): Promise<number> {
   if (run.status === "pending" || run.status === "running") return 0;
   await saveRuntimeState({ linkedinInboxRun: null });
   if (run.status === "failed") {
-    if (run.code === "loggedOut") await recordConnectionError("linkedin", run.message);
     throw new Error(run.message);
   }
 

@@ -136,7 +136,7 @@ export async function loadApiKey(provider: "github" | "apollo"): Promise<string 
 interface RuntimeState {
   lastRefreshAt?: string;
   linkedinInboxCheckedAt?: string;
-  // Browser Use run reading the LinkedIn inbox, collected on a later refresh.
+  // Browser worker run reading the LinkedIn inbox, collected on a later refresh.
   linkedinInboxRun?: string | null;
 }
 

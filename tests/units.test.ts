@@ -114,8 +114,8 @@ describe("linkedin helpers", () => {
   });
 });
 
-describe("LinkedinClient (Browser Use)", () => {
-  const client = new LinkedinClient({ apiKey: "bu_test_key", profileId: "11111111-2222-4333-8444-555555555555" });
+describe("LinkedinClient (browser worker)", () => {
+  const client = new LinkedinClient({ url: "https://worker.test", token: "worker-token" });
   const calls: { url: string; init: RequestInit }[] = [];
   const respond = (body: unknown, status = 200) => {
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
@@ -128,16 +128,16 @@ describe("LinkedinClient (Browser Use)", () => {
     calls.length = 0;
   });
 
-  it("starts one narrow run with the synced profile, a cost cap and an output schema", async () => {
+  it("queues one narrow run with a bearer token, a step cap and an output schema", async () => {
     respond({ id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", status: "queued" });
     const id = await client.startConnectionRequest("https://www.linkedin.com/in/ada", 'Hi "Ada"\nloved the post');
     expect(id).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
     const [call] = calls;
-    expect(call!.url).toBe("https://api.browser-use.com/api/v4/runs");
-    expect((call!.init.headers as Record<string, string>)["X-Browser-Use-API-Key"]).toBe("bu_test_key");
+    expect(call!.url).toBe("https://worker.test/runs");
+    expect(call!.init.method).toBe("POST");
+    expect((call!.init.headers as Record<string, string>).authorization).toBe("Bearer worker-token");
     const body = JSON.parse(String(call!.init.body));
-    expect(body.browserSettings).toEqual({ profileId: "11111111-2222-4333-8444-555555555555", proxyCountryCode: "us" });
-    expect(body.maxCostUsd).toBeGreaterThan(0);
+    expect(body.maxSteps).toBeGreaterThan(0);
     expect(body.outputSchema.required).toEqual(["outcome", "detail"]);
     // The note travels as a JSON string so quotes and newlines can't break the task.
     expect(body.task).toContain(JSON.stringify('Hi "Ada"\nloved the post'));
@@ -145,7 +145,10 @@ describe("LinkedinClient (Browser Use)", () => {
 
   it("maps run outcomes to states the engine understands", async () => {
     const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-    respond({ status: "running" });
+    respond({ id, status: "queued" });
+    expect(await client.workflow(id)).toEqual({ status: "pending", workflowId: id });
+    expect(calls[0]!.url).toBe(`https://worker.test/runs/${id}`);
+    respond({ id, status: "running" });
     expect(await client.workflow(id)).toEqual({ status: "running", workflowId: id });
     respond({ status: "completed", output: { outcome: "sent", detail: "Invitation sent." } });
     expect(await client.workflow(id)).toMatchObject({ status: "completed" });
@@ -157,13 +160,28 @@ describe("LinkedinClient (Browser Use)", () => {
     expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "loggedOut" });
     respond({ status: "failed", error: "Could not produce output matching outputSchema." });
     expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "runFailed" });
+    respond({ error: "Not found" }, 404);
+    expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "runLost" });
   });
 
-  it("confirms the profile holds LinkedIn cookies, and explains HTTP failures without bodies", async () => {
-    respond({ id: "x", name: "Mac Chrome", cookieDomains: [".linkedin.com", "www.google.com"] });
-    expect(await client.profile()).toEqual({ name: "Mac Chrome", hasLinkedin: true });
-    respond({ detail: "secret task text echoed" }, 402);
-    await expect(client.profile()).rejects.toThrow("out of credits");
+  it("reads the worker's session, forwards cookies, and explains HTTP failures without bodies", async () => {
+    respond({
+      ok: true,
+      busy: false,
+      queued: 0,
+      model: "anthropic/claude-haiku-5.5",
+      linkedin: { signedIn: true, expiresAt: "2027-04-30T00:00:00Z", verifiedAt: "2026-10-31T05:00:00Z", lastCheck: "Signed in." },
+    });
+    expect((await client.status()).linkedin.signedIn).toBe(true);
+    respond({ signedIn: true, detail: "Signed in.", cookies: 1 });
+    expect(await client.importSession([{ name: "li_at", value: "v", domain: ".linkedin.com" }])).toMatchObject({ signedIn: true });
+    expect(calls[1]).toMatchObject({ url: "https://worker.test/session", init: { method: "PUT" } });
+    respond({ error: "No li_at cookie." }, 422);
+    await expect(client.importSession([])).rejects.toThrow("No li_at cookie.");
+    respond({ detail: "secret task text echoed" }, 401);
+    await expect(client.status()).rejects.toThrow("BROWSER_WORKER_TOKEN");
+    respond({ detail: "secret task text echoed" }, 500);
+    await expect(client.status()).rejects.toThrow("HTTP 500");
   });
 });
 

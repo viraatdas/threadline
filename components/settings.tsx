@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { disconnectAction, saveApiKeyAction, saveLinkedinAction, saveSettingsAction } from "@/app/(app)/actions";
-import { Button, Field, Input, Section, Status, Textarea } from "@/components/ui";
+import { disconnectAction, saveApiKeyAction, saveSettingsAction, signOutLinkedinAction } from "@/app/(app)/actions";
+import { Button, Field, Input, Section, Status, Textarea, relativeTime } from "@/components/ui";
 import type { Settings } from "@/lib/domain";
 import type { SettingsData } from "@/lib/queries";
 
@@ -39,7 +39,6 @@ function ConnectionRow({ name, state, children }: { name: string; state: ReactNo
 function Connections({ data }: { data: SettingsData }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [linkedin, setLinkedin] = useState({ apiKey: "", profileId: "" });
   const [keys, setKeys] = useState({ github: "", apollo: "" });
 
   const act = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
@@ -82,68 +81,34 @@ function Connections({ data }: { data: SettingsData }) {
           </div>
         </ConnectionRow>
 
-        <ConnectionRow
-          name="LinkedIn"
-          state={
-            data.linkedin ? (
-              <Status tone={data.linkedin.lastError ? "warning" : "accent"}>{data.linkedin.label}</Status>
-            ) : (
-              <Status>not connected</Status>
-            )
-          }
-        >
+        <ConnectionRow name="LinkedIn" state={<LinkedinState linkedin={data.linkedin} />}>
           <p className="text-[13px] leading-5 text-ink-muted">
-            Through{" "}
-            <a className="underline" href="https://cloud.browser-use.com" target="_blank" rel="noreferrer">Browser Use</a>: an
-            AI agent drives a cloud browser signed in with your own LinkedIn cookies. Used for people search, connection
-            requests, messages (each only after you click Send) and reading your inbox for replies. Pay-as-you-go, a few
-            cents per action. LinkedIn may restrict accounts that automate, so keep the daily limit low.
+            Runs on our own{" "}
+            <a className="underline" href="https://github.com/browser-use/browser-use" target="_blank" rel="noreferrer">
+              browser-use
+            </a>{" "}
+            worker (Fly app <code className="rounded bg-surface-subtle px-1">threadline-browser</code>): an AI agent drives a
+            Chromium signed in with your LinkedIn cookies, only on linkedin.com. Used for people search, connection requests,
+            messages (each only after you click Send) and reading your inbox list for replies. LinkedIn may restrict accounts
+            that automate, so keep the daily limit low.
           </p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13px] leading-5 text-ink-muted">
+            <li>Sign in to LinkedIn in Chrome (or Arc, Brave, Safari) on your Mac.</li>
             <li>
-              Create an API key at{" "}
-              <a className="underline" href="https://cloud.browser-use.com" target="_blank" rel="noreferrer">cloud.browser-use.com</a>.
+              In this repo on your Mac, run the login. macOS may ask to let it read Chrome’s cookie key; allow it.
+              <pre className="mt-1 overflow-x-auto rounded-[8px] bg-surface-subtle px-3 py-2 text-[12px] leading-5">pnpm linkedin-login</pre>
             </li>
-            <li>
-              On your Mac, signed in to LinkedIn in your browser, run the sync and pick LinkedIn. It prints a profile ID:
-              <pre className="mt-1 overflow-x-auto rounded-[8px] bg-surface-subtle px-3 py-2 text-[12px] leading-5">
-                {`export BROWSER_USE_API_KEY=bu_…
-curl -fsSL https://browser-use.com/profile.sh | sh`}
-              </pre>
-            </li>
-            <li>Paste the key and profile ID here. Re-run the sync whenever LinkedIn signs you out.</li>
+            <li>Re-run it whenever LinkedIn signs you out. Your cookies go only to the worker, never into this app’s database.</li>
           </ol>
-          {data.linkedin?.lastError ? <p className="mt-2 text-[13px] text-danger">Last error: {data.linkedin.lastError}</p> : null}
-          <form
-            className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
-            onSubmit={(event) => {
-              event.preventDefault();
-              act(() => saveLinkedinAction(linkedin), "LinkedIn connected");
-              setLinkedin({ apiKey: "", profileId: "" });
-            }}
-          >
-            <Input
-              type="password"
-              autoComplete="off"
-              placeholder="Browser Use API key"
-              value={linkedin.apiKey}
-              onChange={(event) => setLinkedin({ ...linkedin, apiKey: event.target.value })}
-              aria-label="Browser Use API key"
-            />
-            <Input
-              autoComplete="off"
-              placeholder="Profile ID"
-              value={linkedin.profileId}
-              onChange={(event) => setLinkedin({ ...linkedin, profileId: event.target.value })}
-              aria-label="Browser Use profile ID"
-            />
-            <Button type="submit" size="sm" variant="primary" className="h-9" disabled={pending || !linkedin.apiKey || !linkedin.profileId}>
-              Save
-            </Button>
-          </form>
-          {data.linkedin ? (
-            <Button size="sm" variant="ghost" className="mt-2" disabled={pending} onClick={() => act(() => disconnectAction("linkedin"), "LinkedIn disconnected")}>
-              Disconnect
+          {data.linkedin.state === "signed_in" || data.linkedin.state === "signed_out" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-2"
+              disabled={pending || data.linkedin.state === "signed_out"}
+              onClick={() => act(() => signOutLinkedinAction(), "LinkedIn signed out on the worker")}
+            >
+              Sign out on worker
             </Button>
           ) : null}
         </ConnectionRow>
@@ -270,4 +235,27 @@ function ProductForm({ settings }: { settings: Settings }) {
       </Section>
     </form>
   );
+}
+
+function LinkedinState({ linkedin }: { linkedin: SettingsData["linkedin"] }) {
+  switch (linkedin.state) {
+    case "unconfigured":
+      return <Status>worker not configured</Status>;
+    case "unreachable":
+      return <Status tone="danger">worker unreachable</Status>;
+    case "signed_out":
+      return (
+        <div className="space-y-1">
+          <Status tone="warning">not signed in</Status>
+          {linkedin.lastCheck ? <p className="text-[12px] text-ink-muted">{linkedin.lastCheck}</p> : null}
+        </div>
+      );
+    case "signed_in":
+      return (
+        <div className="space-y-1">
+          <Status tone="accent">signed in</Status>
+          {linkedin.verifiedAt ? <p className="text-[12px] text-ink-muted">checked {relativeTime(linkedin.verifiedAt)}</p> : null}
+        </div>
+      );
+  }
 }

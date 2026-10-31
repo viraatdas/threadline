@@ -45,11 +45,12 @@ Connect accounts in **Settings**:
 
 - **Gmail** — OAuth with `gmail.send` + `gmail.readonly`. The Google OAuth
   client must allow `…/api/integrations/gmail/callback`.
-- **LinkedIn** — a [Browser Use](https://cloud.browser-use.com) API key plus a
-  profile ID. On your Mac, signed in to LinkedIn, run
-  `BROWSER_USE_API_KEY=… curl -fsSL https://browser-use.com/profile.sh | sh`
-  and pick LinkedIn; it prints the profile ID. Re-run it when LinkedIn signs
-  you out. Pay-as-you-go, a few cents per action.
+- **LinkedIn** — runs through our own [browser-use](https://github.com/browser-use/browser-use)
+  worker (`browser/`, see below). Set `BROWSER_WORKER_URL` and
+  `BROWSER_WORKER_TOKEN`, sign in to linkedin.com in Chrome (or Arc, Brave,
+  Safari, Firefox) on your Mac, then run `pnpm linkedin-login` (needs
+  `OUTBOUND_URL` + `IMPORT_TOKEN` in `.env.local`; macOS asks for Keychain
+  access once). Re-run it when Settings says LinkedIn is signed out.
 - **GitHub token** — fine-grained, no extra permissions; enables workflow search.
 - **Apollo key** — optional; adds people search by domain and verified emails.
 
@@ -72,3 +73,18 @@ vercel pull --environment=production --yes
 vercel build --prod
 vercel deploy --prebuilt --prod --archive=tgz
 ```
+
+### LinkedIn browser worker
+
+`browser/` is a small Python service (browser-use + Chromium under Xvfb) on
+Fly, app `threadline-browser`, with a 1 GB volume for the session. It needs
+two secrets: `BROWSER_WORKER_TOKEN` (the same value as the app's) and
+`OPENROUTER_API_KEY`.
+
+```sh
+cd browser
+fly secrets set BROWSER_WORKER_TOKEN=… OPENROUTER_API_KEY=… -a threadline-browser
+fly deploy
+```
+
+Offline tests: `pip install -r requirements.txt pytest httpx && pytest -q test_worker.py`.

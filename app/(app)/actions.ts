@@ -21,7 +21,7 @@ import {
   type SendOutcome,
 } from "@/lib/engine";
 import { ingest, upsertPerson, type IngestSummary } from "@/lib/ingest";
-import { LinkedinClient, linkedinCredentialsSchema } from "@/lib/linkedin";
+import { LinkedinClient, workerConfig } from "@/lib/linkedin";
 import { parseManualImport } from "@/lib/manual-import";
 import { findMacCiTeams } from "@/lib/sources/github";
 import { searchHackerNews } from "@/lib/sources/hn";
@@ -281,16 +281,11 @@ export async function saveSettingsAction(input: z.input<typeof settingsSchema>) 
   return run(() => saveSettings(settingsSchema.parse(input)), ["/settings"]);
 }
 
-export async function saveLinkedinAction(input: z.input<typeof linkedinCredentialsSchema>) {
+export async function signOutLinkedinAction() {
   return run(async () => {
-    const credentials = linkedinCredentialsSchema.parse(input);
-    // Checked before saving: the key works and the synced profile really holds
-    // LinkedIn cookies. Costs nothing; no browser is started.
-    const profile = await new LinkedinClient(credentials).profile();
-    if (!profile.hasLinkedin) {
-      throw new Error("That Browser Use profile has no linkedin.com cookies. Run the profile sync again and pick LinkedIn.");
-    }
-    await saveConnection("linkedin", `Browser Use · ${profile.name ?? "LinkedIn profile"}`, credentials, { provider: "Browser Use" });
+    const config = workerConfig();
+    if (!config) throw new Error("The browser worker isn't configured.");
+    await new LinkedinClient(config).signOut();
   }, ["/settings"]);
 }
 
@@ -304,6 +299,6 @@ export async function saveApiKeyAction(provider: "github" | "apollo", token: str
   }, ["/settings", "/find"]);
 }
 
-export async function disconnectAction(provider: "gmail" | "linkedin" | "github" | "apollo") {
-  return run(() => deleteConnection(z.enum(["gmail", "linkedin", "github", "apollo"]).parse(provider)), ["/settings"]);
+export async function disconnectAction(provider: "gmail" | "github" | "apollo") {
+  return run(() => deleteConnection(z.enum(["gmail", "github", "apollo"]).parse(provider)), ["/settings"]);
 }
