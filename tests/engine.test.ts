@@ -19,6 +19,9 @@ const harness = vi.hoisted(() => ({
   linkedinOutcome: { status: "completed", data: null } as Record<string, unknown>,
   inboxRuns: 0,
   inbox: { conversations: [] } as unknown,
+  // Gmail threads the owner has outside Threadline, and whether Gmail answers.
+  gmailThreads: [] as { email: string; id: string; at: Date }[],
+  gmailDown: false,
 }));
 
 vi.mock("@/lib/db/client", () => ({ getDatabase: () => harness.db }));
@@ -41,7 +44,14 @@ vi.mock("@/lib/gmail", () => ({
         const n = harness.sent.length;
         return { id: `gm-${n}`, threadId: "thread-1", rfcMessageId: `<msg-${n}@mail.gmail.com>` };
       },
-      countThreadsWith: async (email: string) => (email === "ada@acme.dev" ? 2 : 0),
+      otherThreadsWith: async (email: string, exclude: string[], since?: Date) => {
+        if (harness.gmailDown) throw new Error("Gmail 503");
+        const threads = harness.gmailThreads.filter(
+          (thread) => thread.email === email && !exclude.includes(thread.id) && (!since || thread.at >= since),
+        );
+        const last = Math.max(...threads.map((thread) => thread.at.getTime()));
+        return { threads: threads.length, lastAt: threads.length ? new Date(last) : null };
+      },
       findReply: async (input: { email?: string | null }) => (input.email === harness.replyFrom ? harness.reply : null),
     }),
   },
@@ -71,7 +81,7 @@ vi.mock("@/lib/linkedin", async (importOriginal) => {
 const { ingest } = await import("@/lib/ingest");
 const engine = await import("@/lib/engine");
 const queries = await import("@/lib/queries");
-const { saveSettings, loadSettings, saveRuntimeState } = await import("@/lib/store");
+const { saveSettings, loadSettings, saveRuntimeState, loadRuntimeState } = await import("@/lib/store");
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 let db: Db;
@@ -171,7 +181,7 @@ describe("sequence", () => {
     const result = await engine.enroll([ada.id, lin.id], campaignId);
     expect(result).toMatchObject({ enrolled: 2, drafted: 2 });
 
-    expect((await person("Ada Founder")).metadata).toMatchObject({ priorThreads: 2 });
+    expect((await person("Ada Founder")).metadata).not.toHaveProperty("inTouch");
     const adaDrafts = await draftsFor(ada.id);
     expect(adaDrafts.map((m) => [m.step, m.channel, m.status])).toEqual([[0, "email", "draft"]]);
     // Lin has no email: step 1 is skipped, the LinkedIn invite is drafted.
@@ -404,8 +414,116 @@ describe("LinkedIn replies", () => {
     const second = await engine.refresh();
     expect(second.replies).toBeGreaterThanOrEqual(1);
     expect((await person("Rae Plier")).stage).toBe("replied");
+    // The same read keeps the conversation list for the "already in touch" check.
+    expect((await loadRuntimeState()).linkedinConversations).toEqual([{ name: "Rae Plier", when: "2:14 PM" }]);
     // The run was collected; the next one waits for the interval.
     await engine.refresh();
     expect(harness.inboxRuns).toBe(runsBefore + 1);
+  });
+});
+
+describe("already in touch", () => {
+  let warmCampaignId: string;
+  const addPerson = async (name: string, email: string | null) => {
+    const [company] = await db.insert(schema.companies).values({ name: `${name} Co`, source: "manual" }).returning();
+    const [row] = await db
+      .insert(schema.people)
+      .values({ companyId: company!.id, name, email, emailStatus: email ? "found" : null, source: "manual" })
+      .returning();
+    return row!;
+  };
+  const includeAnyway = (id: string) =>
+    db
+      .update(schema.people)
+      .set({ metadata: sql`${schema.people.metadata} || '{"inTouchOverride": true}'::jsonb` })
+      .where(eq(schema.people.id, id));
+
+  beforeAll(async () => {
+    const [campaign] = await db
+      .insert(schema.campaigns)
+      .values({
+        name: "Two emails",
+        angle: "x",
+        steps: [
+          { channel: "email", waitDays: 0, guidance: "" },
+          { channel: "email", waitDays: 3, guidance: "" },
+        ],
+      })
+      .returning();
+    warmCampaignId = campaign!.id;
+  });
+
+  it("holds back someone with an email thread until the owner includes them anyway", async () => {
+    const kim = await addPerson("Kim Known", "kim@known.dev");
+    harness.gmailThreads.push({ email: "kim@known.dev", id: "t-kim", at: new Date("2026-10-01T17:00:00Z") });
+
+    const held = await engine.enroll([kim.id], warmCampaignId);
+    expect(held).toMatchObject({ enrolled: 0, heldBack: ["Kim Known"] });
+    const after = await person("Kim Known");
+    expect(after.stage).toBe("new");
+    expect(after.metadata).toMatchObject({ inTouch: { gmail: { threads: 1, lastAt: "2026-10-01T17:00:00.000Z" } } });
+    expect(await draftsFor(kim.id)).toEqual([]);
+
+    await includeAnyway(kim.id);
+    expect(await engine.enroll([kim.id], warmCampaignId)).toMatchObject({ enrolled: 1, heldBack: [] });
+    const [draft] = await draftsFor(kim.id);
+    const sentBefore = harness.sent.length;
+    expect(await engine.sendMessage(draft!.id)).toEqual({ status: "sent" });
+    expect(harness.sent).toHaveLength(sentBefore + 1);
+  });
+
+  it("holds back someone in the latest LinkedIn conversation list", async () => {
+    await saveRuntimeState({ linkedinConversations: [{ name: "Lee Linked", when: "Oct 20" }] });
+    const lee = await addPerson("Lée Linked", "lee@linked.dev");
+    expect(await engine.enroll([lee.id], warmCampaignId)).toMatchObject({ enrolled: 0, heldBack: ["Lée Linked"] });
+    expect((await person("Lée Linked")).metadata).toMatchObject({ inTouch: { linkedin: { when: "Oct 20" } } });
+  });
+
+  it("checks again before every send, and only counts mail outside the sequence once it starts", async () => {
+    const sam = await addPerson("Sam Later", "sam@later.dev");
+    expect(await engine.enroll([sam.id], warmCampaignId)).toMatchObject({ enrolled: 1 });
+    const [first] = await draftsFor(sam.id);
+
+    // The owner emailed Sam directly after enrolling: the first send stops.
+    harness.gmailThreads.push({ email: "sam@later.dev", id: "t-sam-old", at: new Date(Date.now() - 3600_000) });
+    const sentBefore = harness.sent.length;
+    const blocked = await engine.sendMessage(first!.id);
+    expect(blocked).toMatchObject({ status: "failed", detail: expect.stringContaining("already in touch with Sam Later") });
+    expect(harness.sent).toHaveLength(sentBefore);
+    expect((await draftsFor(sam.id))[0]).toMatchObject({ status: "failed", sentAt: null });
+    expect((await person("Sam Later")).metadata).toMatchObject({ inTouch: { gmail: { threads: 1 } } });
+
+    // If the check can't run, nothing is sent.
+    harness.gmailThreads = harness.gmailThreads.filter((thread) => thread.email !== "sam@later.dev");
+    harness.gmailDown = true;
+    expect(await engine.sendMessage(first!.id)).toMatchObject({ status: "failed", detail: expect.stringContaining("Couldn't check") });
+    harness.gmailDown = false;
+    expect(await engine.sendMessage(first!.id)).toEqual({ status: "sent" });
+
+    // Mail from before the sequence started no longer counts; mail since does.
+    harness.gmailThreads.push({ email: "sam@later.dev", id: "t-sam-before", at: new Date(Date.now() - 86_400_000) });
+    await db.update(schema.people).set({ nextStepAt: new Date(Date.now() - 1000) }).where(eq(schema.people.id, sam.id));
+    await engine.draftDue();
+    const followUp = (await draftsFor(sam.id)).find((m) => m.step === 1)!;
+    harness.gmailThreads.push({ email: "sam@later.dev", id: "t-sam-since", at: new Date(Date.now() + 1000) });
+    expect(await engine.sendMessage(followUp.id)).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining("outside this sequence since it started"),
+    });
+
+    await includeAnyway(sam.id);
+    expect(await engine.sendMessage(followUp.id)).toEqual({ status: "sent" });
+  });
+
+  it("keeps the last good conversation list when an inbox read comes back empty", async () => {
+    await saveRuntimeState({
+      linkedinInboxRun: "inbox-run",
+      linkedinConversations: [{ name: "Lee Linked", when: "Oct 20" }],
+    });
+    harness.inbox = { conversations: [] };
+    await engine.refresh();
+    const state = await loadRuntimeState();
+    expect(state.linkedinInboxRun).toBeNull();
+    expect(state.linkedinConversations).toEqual([{ name: "Lee Linked", when: "Oct 20" }]);
   });
 });

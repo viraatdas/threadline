@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { redraftAction, refreshAction, sendAction, skipAction, updatePersonAction } from "@/app/(app)/actions";
+import { includeAnywayAction, redraftAction, refreshAction, sendAction, skipAction, updatePersonAction } from "@/app/(app)/actions";
 import { Button, Empty, Input, Section, Status, Textarea, relativeTime } from "@/components/ui";
-import { CHANNEL_LABELS } from "@/lib/domain";
+import { CHANNEL_LABELS, describeInTouch, readInTouch } from "@/lib/domain";
 import type { TodayData } from "@/lib/queries";
 
 export function Today({ data }: { data: TodayData }) {
@@ -118,6 +118,8 @@ function DraftCard({ row }: { row: Row }) {
   const firstEmail = isEmail && message.subject !== null;
   const stepCount = campaign?.steps.length ?? 0;
   const limit = message.channel === "linkedin_invite" ? 300 : null;
+  const inTouch = readInTouch(person.metadata);
+  const [included, setIncluded] = useState(person.metadata.inTouchOverride === true);
 
   if (gone) return null;
 
@@ -153,6 +155,13 @@ function DraftCard({ row }: { row: Row }) {
       setGone(true);
     });
 
+  const include = () =>
+    startTransition(async () => {
+      const result = await includeAnywayAction(person.id);
+      if (!result.ok) return void toast.error(result.error);
+      setIncluded(true);
+    });
+
   const rewrite = () =>
     startTransition(async () => {
       const result = await redraftAction(message.id);
@@ -180,9 +189,6 @@ function DraftCard({ row }: { row: Row }) {
                 <Mail className="size-3" aria-hidden="true" />
                 {person.email ?? "no email"}
                 {person.emailStatus === "guessed" ? <Status tone="warning">guessed address</Status> : null}
-                {typeof person.metadata.priorThreads === "number" && person.metadata.priorThreads > 0 ? (
-                  <Status tone="blue">{person.metadata.priorThreads} earlier threads with you</Status>
-                ) : null}
               </span>
             ) : isX && person.twitterUrl ? (
               <a href={person.twitterUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
@@ -207,6 +213,19 @@ function DraftCard({ row }: { row: Row }) {
         </div>
       </header>
       <div className="space-y-3 px-4 py-3">
+        {inTouch ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Status tone={included ? "blue" : "warning"}>
+              Already in touch: {describeInTouch(inTouch)}.{" "}
+              {included ? "Included anyway; write it as someone they know." : "Held until you include them."}
+            </Status>
+            {included ? null : (
+              <Button size="sm" variant="ghost" onClick={include} disabled={pending}>
+                Include anyway
+              </Button>
+            )}
+          </div>
+        ) : null}
         {message.status === "failed" && message.error ? (
           <Status tone="danger">Last attempt failed: {message.error}</Status>
         ) : null}

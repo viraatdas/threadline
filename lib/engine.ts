@@ -14,10 +14,17 @@ import {
   type Message,
   type Person,
 } from "@/lib/db/schema";
-import { LINKEDIN_CHANNELS, type Channel } from "@/lib/domain";
+import { describeInTouch, LINKEDIN_CHANNELS, readInTouch, type Channel, type InTouch } from "@/lib/domain";
 import { GmailClient } from "@/lib/gmail";
 import { ingest, upsertPerson } from "@/lib/ingest";
-import { LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
+import {
+  conversationsFromInbox,
+  LinkedinClient,
+  normalizeLinkedinUrl,
+  parseLinkedinTime,
+  peopleFromSearch,
+  repliesFromInbox,
+} from "@/lib/linkedin";
 import { apolloFindPeople, apolloRevealEmail } from "@/lib/sources/apollo";
 import { domainAcceptsMail, guessEmail } from "@/lib/sources/email-guess";
 import { checkOrgForMacCi } from "@/lib/sources/github";
@@ -239,41 +246,93 @@ export async function enroll(personIds: string[], campaignId: string) {
   const database = getDatabase();
   const [campaign] = await database.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
   if (!campaign) throw new Error("Campaign not found.");
-  const enrolled = await database
-    .update(people)
-    .set({ campaignId, stage: "active", nextStep: 0, nextStepAt: new Date(), closedReason: null, updatedAt: new Date() })
-    .where(
-      and(
-        inArray(people.id, personIds),
-        or(inArray(people.stage, ["new", "active"]), and(eq(people.stage, "closed"), eq(people.closedReason, "no_reply"))),
-        // Re-enrolling in the same campaign would collide with its own drafts.
-        ne(sql`coalesce(${people.campaignId}::text, '')`, campaignId),
-      ),
-    )
-    .returning({ id: people.id });
+  const eligible = and(
+    inArray(people.id, personIds),
+    or(inArray(people.stage, ["new", "active"]), and(eq(people.stage, "closed"), eq(people.closedReason, "no_reply"))),
+    // Re-enrolling in the same campaign would collide with its own drafts.
+    ne(sql`coalesce(${people.campaignId}::text, '')`, campaignId),
+  );
+  const candidates = await database.select().from(people).where(eligible);
+  // Someone the owner already talks to stays out of a cold sequence unless the
+  // owner chose "Include anyway". If the check fails, what an earlier check
+  // found stands; the same check runs again before every send.
+  const gmail = await GmailClient.load().then((client) => ({ client }), () => null);
+  const ready: string[] = [];
+  const heldBack: string[] = [];
+  await mapLimit(candidates, 4, async (candidate) => {
+    let touch: InTouch | null;
+    try {
+      if (!gmail) throw new Error("Gmail didn't load.");
+      touch = await inTouchWith(candidate, gmail.client);
+      await database.update(people).set({ metadata: storeInTouch(touch) }).where(eq(people.id, candidate.id));
+    } catch {
+      touch = readInTouch(candidate.metadata);
+    }
+    if (touch && candidate.metadata.inTouchOverride !== true) heldBack.push(candidate.name);
+    else ready.push(candidate.id);
+  });
+  const enrolled = ready.length
+    ? await database
+        .update(people)
+        .set({ campaignId, stage: "active", nextStep: 0, nextStepAt: new Date(), closedReason: null, updatedAt: new Date() })
+        .where(and(eligible, inArray(people.id, ready)))
+        .returning({ id: people.id })
+    : [];
   for (const { id } of enrolled) await skipOpenDrafts(id, "Moved to another campaign");
-  await notePriorThreads(enrolled.map((p) => p.id)).catch(() => undefined);
   const drafted = await draftDue({ personIds: enrolled.map((p) => p.id) });
-  return { enrolled: enrolled.length, skipped: personIds.length - enrolled.length, ...drafted };
+  return { enrolled: enrolled.length, skipped: personIds.length - enrolled.length - heldBack.length, heldBack, ...drafted };
 }
 
-// Live Gmail lookup instead of a synced history: if the owner has already
-// emailed someone, drafts must not read as a cold intro.
-async function notePriorThreads(personIds: string[]) {
-  const gmail = await GmailClient.load();
-  if (!gmail || !personIds.length) return;
-  const database = getDatabase();
-  const rows = await database
-    .select({ id: people.id, email: people.email })
-    .from(people)
-    .where(and(inArray(people.id, personIds), isNotNull(people.email)));
-  await mapLimit(rows, 4, async (row) => {
-    const priorThreads = await gmail.countThreadsWith(row.email!);
-    await database
-      .update(people)
-      .set({ metadata: sql`${people.metadata} || ${JSON.stringify({ priorThreads })}::jsonb` })
-      .where(eq(people.id, row.id));
-  });
+// ── Already in touch ─────────────────────────────────────────────────────────
+// Contact the owner has had outside Threadline: a Gmail thread Threadline
+// didn't start, or a LinkedIn conversation in the latest inbox read. Such
+// people are held out of cold sequences, and a send stops if the owner has
+// emailed them separately since Threadline first wrote, unless the owner chose
+// to include them anyway (metadata.inTouchOverride).
+async function inTouchWith(person: Person, gmail: GmailClient | null, since?: Date): Promise<InTouch | null> {
+  const found: InTouch = { checkedAt: new Date().toISOString() };
+  if (gmail && person.email) {
+    const ours = await getDatabase()
+      .select({ threadId: messages.threadId })
+      .from(messages)
+      .where(and(eq(messages.personId, person.id), eq(messages.channel, "email"), isNotNull(messages.threadId)));
+    const other = await gmail.otherThreadsWith(
+      person.email,
+      ours.flatMap((row) => (row.threadId ? [row.threadId] : [])),
+      since,
+    );
+    if (other.threads) found.gmail = { threads: other.threads, lastAt: other.lastAt?.toISOString() ?? null };
+  }
+  // A LinkedIn conversation may be Threadline's own once it has written to
+  // them there: after a sequence starts, or for someone being re-enrolled.
+  if (!since && !(await sentOnLinkedin(person.id))) {
+    const { linkedinConversations = [] } = await loadRuntimeState();
+    const match = linkedinConversations.find((conversation) => nameKey(conversation.name) === nameKey(person.name));
+    if (match) found.linkedin = { when: match.when ?? null };
+  }
+  return found.gmail || found.linkedin ? found : null;
+}
+
+// Replaces any earlier finding; drafts read it so someone the owner includes
+// anyway doesn't get a cold introduction.
+const storeInTouch = (touch: InTouch | null) =>
+  sql`(${people.metadata} - 'inTouch') || ${JSON.stringify(touch ? { inTouch: touch } : {})}::jsonb`;
+
+async function sentOnLinkedin(personId: string) {
+  const [row] = await getDatabase()
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.personId, personId), inArray(messages.channel, LINKEDIN_CHANNELS), eq(messages.status, "sent")))
+    .limit(1);
+  return Boolean(row);
+}
+
+async function firstSentAt(personId: string): Promise<Date | null> {
+  const [row] = await getDatabase()
+    .select({ at: sql<string | Date | null>`min(${messages.sentAt})` })
+    .from(messages)
+    .where(and(eq(messages.personId, personId), eq(messages.direction, "out"), eq(messages.status, "sent")));
+  return row?.at ? new Date(row.at) : null;
 }
 
 export async function stopSequence(personId: string, reason: string) {
@@ -389,7 +448,7 @@ export async function draftDue(options: { personIds?: string[]; limit?: number }
           company: context.company,
           signals: context.signals,
           history: context.history,
-          priorThreads: context.priorThreads,
+          inTouch: context.inTouch,
         });
         await database
           .insert(messages)
@@ -432,8 +491,8 @@ async function draftingContext(person: Person) {
     .where(and(eq(messages.personId, person.id), inArray(messages.status, ["sent", "received"])))
     .orderBy(asc(messages.createdAt))
     .limit(12);
-  const priorThreads = typeof person.metadata.priorThreads === "number" ? person.metadata.priorThreads : 0;
-  return { company: company ?? null, signals: companySignals, history, priorThreads };
+  const inTouch = readInTouch(person.metadata);
+  return { company: company ?? null, signals: companySignals, history, inTouch: inTouch ? describeInTouch(inTouch) : undefined };
 }
 
 export async function redraft(messageId: string) {
@@ -456,7 +515,7 @@ export async function redraft(messageId: string) {
     company: context.company,
     signals: context.signals,
     history: context.history,
-    priorThreads: context.priorThreads,
+    inTouch: context.inTouch,
   });
   await database
     .update(messages)
@@ -545,6 +604,27 @@ export async function sendMessage(
   if (person.lastContactedAt) {
     const replied = await checkReplies([person]).catch(() => 0);
     if (replied) return fail(`Not sent: ${person.name} already replied.`, "skipped");
+  }
+  // Checked again here because days pass between enrolling and sending. After
+  // Threadline's first message, only email outside this sequence counts. If
+  // the check itself fails, nothing is sent.
+  if (person.metadata.inTouchOverride !== true) {
+    const since = await firstSentAt(person.id);
+    let touch: InTouch | null;
+    try {
+      touch = await inTouchWith(person, await GmailClient.load(), since ?? undefined);
+    } catch (error) {
+      return fail(`Couldn't check for earlier conversations with ${person.name} (${describeError(error)}). Try again.`);
+    }
+    if (touch) {
+      await database
+        .update(people)
+        .set({ metadata: storeInTouch(touch) })
+        .where(eq(people.id, person.id));
+      return fail(
+        `Not sent: ${since ? `you've been in touch with ${person.name} outside this sequence since it started` : `you're already in touch with ${person.name}`} (${describeInTouch(touch)}). Choose "Include anyway" to send it.`,
+      );
+    }
   }
   const [campaign] = message.campaignId
     ? await database.select().from(campaigns).where(eq(campaigns.id, message.campaignId)).limit(1)
@@ -745,36 +825,50 @@ async function checkReplies(candidates: Person[]): Promise<number> {
   return replied;
 }
 
-// Reading the LinkedIn inbox is a browser run that takes a minute or two, so
-// one refresh starts it and a later one (the hourly cron, or the next "Check
-// replies") collects it. At most one run every few hours, and only while
-// someone we reached on LinkedIn is still in a sequence.
+// Reading the LinkedIn inbox is a browser run that takes a minute or two. The
+// cron waits for it; otherwise a later refresh (the next "Check replies")
+// collects it. Replies are checked at most every few hours while someone we
+// reached on LinkedIn is in a sequence; the conversation list, which feeds the
+// "already in touch" check, is read daily regardless.
 const INBOX_EVERY_MS = 4 * 60 * 60 * 1000;
+const CONVERSATIONS_EVERY_MS = 20 * 60 * 60 * 1000;
 
-async function checkLinkedinReplies(): Promise<number> {
+async function checkLinkedinReplies(waitMs: number): Promise<number> {
   const client = await LinkedinClient.load();
   if (!client) return 0;
   const database = getDatabase();
   const state = await loadRuntimeState();
   const now = new Date();
+  const age = (iso: string | undefined) => (iso ? now.getTime() - Date.parse(iso) : Infinity);
 
-  if (!state.linkedinInboxRun) {
-    const due = !state.linkedinInboxCheckedAt || now.getTime() - Date.parse(state.linkedinInboxCheckedAt) > INBOX_EVERY_MS;
+  let runId = state.linkedinInboxRun;
+  if (!runId) {
+    let due = age(state.linkedinConversationsAt) > CONVERSATIONS_EVERY_MS;
+    if (!due && age(state.linkedinInboxCheckedAt) > INBOX_EVERY_MS) {
+      const [anyone] = await database
+        .select({ id: people.id })
+        .from(people)
+        .innerJoin(messages, eq(messages.personId, people.id))
+        .where(and(eq(people.stage, "active"), inArray(messages.channel, LINKEDIN_CHANNELS), eq(messages.status, "sent")))
+        .limit(1);
+      due = Boolean(anyone);
+    }
     if (!due) return 0;
-    const [anyone] = await database
-      .select({ id: people.id })
-      .from(people)
-      .innerJoin(messages, eq(messages.personId, people.id))
-      .where(and(eq(people.stage, "active"), inArray(messages.channel, LINKEDIN_CHANNELS), eq(messages.status, "sent")))
-      .limit(1);
-    if (!anyone) return 0;
-    await saveRuntimeState({ linkedinInboxRun: await client.startInboxCheck(), linkedinInboxCheckedAt: now.toISOString() });
-    return 0;
+    runId = await client.startInboxCheck();
+    await saveRuntimeState({ linkedinInboxRun: runId, linkedinInboxCheckedAt: now.toISOString() });
+    if (!waitMs) return 0;
   }
 
-  const run = await client.workflow(state.linkedinInboxRun);
+  const run = waitMs ? await client.waitFor(runId, waitMs) : await client.workflow(runId);
   if (run.status === "pending" || run.status === "running") return 0;
-  await saveRuntimeState({ linkedinInboxRun: null });
+  const conversations = run.status === "completed" ? conversationsFromInbox(run.data) : [];
+  await saveRuntimeState({
+    linkedinInboxRun: null,
+    // An empty read (the page didn't load) mustn't wipe the last good list.
+    ...(conversations.length
+      ? { linkedinConversations: conversations.slice(0, 100), linkedinConversationsAt: new Date().toISOString() }
+      : {}),
+  });
   if (run.status === "failed") {
     throw new Error(run.message);
   }
@@ -805,8 +899,9 @@ async function checkLinkedinReplies(): Promise<number> {
 const nameKey = (name: string) => name.toLowerCase().normalize("NFKD").replace(/[^a-z]/g, "");
 
 // Daily cron + the owner's Refresh button: confirm queued LinkedIn sends,
-// detect replies and bounces, then draft whatever follow-ups came due.
-export async function refresh() {
+// detect replies and bounces, then draft whatever follow-ups came due. The
+// cron passes inboxWaitMs so a LinkedIn inbox read finishes in the same run.
+export async function refresh(options: { inboxWaitMs?: number } = {}) {
   const database = getDatabase();
   const problems: string[] = [];
 
@@ -832,7 +927,7 @@ export async function refresh() {
     problems.push(`Gmail: ${error instanceof Error ? error.message : "reply check failed"}`);
     return 0;
   });
-  const linkedinReplies = await checkLinkedinReplies().catch((error: unknown) => {
+  const linkedinReplies = await checkLinkedinReplies(options.inboxWaitMs ?? 0).catch((error: unknown) => {
     problems.push(`LinkedIn: ${error instanceof Error ? error.message : "inbox check failed"}`);
     return 0;
   });

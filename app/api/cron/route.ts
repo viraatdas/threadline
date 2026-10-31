@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   if (!hasBearer(request, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const summary = await refresh();
+  const summary = await refresh({ inboxWaitMs: 120_000 });
   console.info("cron refresh", {
     replies: summary.replies,
     drafted: summary.drafted,

@@ -244,12 +244,21 @@ export class GmailClient {
     return null;
   }
 
-  async countThreadsWith(email: string): Promise<number> {
-    const list = await fetchJson<{ resultSizeEstimate?: number }>(
-      `${API}/threads?maxResults=1&q=${encodeURIComponent(`from:${email} OR to:${email}`)}`,
-      await this.token(),
-    );
-    return list.resultSizeEstimate ?? 0;
+  // Threads with this address that Threadline didn't start (`exclude`: our own
+  // thread ids), optionally only ones active since a date: evidence the owner
+  // is already in touch outside the sequence.
+  async otherThreadsWith(email: string, exclude: string[], since?: Date): Promise<{ threads: number; lastAt: Date | null }> {
+    const token = await this.token();
+    const after = since ? ` after:${Math.floor(since.getTime() / 1000)}` : "";
+    const q = `(from:${email} OR to:${email} OR cc:${email}) -in:drafts${after}`;
+    const list = await fetchJson<{ threads?: { id: string }[] }>(`${API}/threads?maxResults=20&q=${encodeURIComponent(q)}`, token);
+    const others = (list.threads ?? []).filter((thread) => !exclude.includes(thread.id));
+    const newest = others[0];
+    if (!newest) return { threads: 0, lastAt: null };
+    // Threads come newest first, so the first one holds the latest message.
+    const thread = await fetchJson<{ messages?: { internalDate: string }[] }>(`${API}/threads/${newest.id}?format=minimal`, token);
+    const times = (thread.messages ?? []).map((message) => Number(message.internalDate)).filter(Number.isFinite);
+    return { threads: others.length, lastAt: times.length ? new Date(Math.max(...times)) : null };
   }
 }
 

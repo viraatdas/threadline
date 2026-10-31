@@ -138,6 +138,11 @@ interface RuntimeState {
   linkedinInboxCheckedAt?: string;
   // Browser worker run reading the LinkedIn inbox, collected on a later refresh.
   linkedinInboxRun?: string | null;
+  // Who the owner has LinkedIn conversations with, from the latest inbox read
+  // (names and LinkedIn's time labels only, no message text). The "already in
+  // touch" check reads it.
+  linkedinConversations?: { name: string; when?: string }[];
+  linkedinConversationsAt?: string;
 }
 
 export async function loadRuntimeState(): Promise<RuntimeState> {

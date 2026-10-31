@@ -227,10 +227,11 @@ export class LinkedinClient {
         "",
         "Task (read-only): open https://www.linkedin.com/messaging/ and read the conversation list.",
         "Do not open any conversation (that would mark it read). Do not reply, archive, or change anything.",
-        "For the 25 most recent conversations, return the other person's name, whether the latest message is from them (not from the owner), the preview text shown, and the time shown.",
+        "Scroll the conversation list to load more until you have the 40 most recent conversations or reach the end of the list.",
+        "For each, return the other person's name, whether the latest message is from them (not from the owner), the preview text shown, and the time shown.",
       ].join("\n"),
       inboxOutputSchema,
-      20,
+      30,
     );
   }
 
@@ -352,19 +353,26 @@ export function peopleFromSearch(data: unknown): FoundPerson[] {
     }));
 }
 
+const inboxRow = z.object({
+  name: z.string().trim().min(1).max(200),
+  lastMessageFromThem: z.boolean(),
+  preview: z.string().max(2000),
+  when: z.string().max(60).nullish(),
+});
+
 /** Conversations whose latest message is theirs, from an inbox-check run. */
 export function repliesFromInbox(data: unknown): { name: string; preview: string; when?: string }[] {
-  return parseEach(
-    (data as { conversations?: unknown } | null)?.conversations,
-    z.object({
-      name: z.string().trim().min(1).max(200),
-      lastMessageFromThem: z.boolean(),
-      preview: z.string().max(2000),
-      when: z.string().max(60).nullish(),
-    }),
-  )
+  return parseEach((data as { conversations?: unknown } | null)?.conversations, inboxRow)
     .filter((row) => row.lastMessageFromThem)
     .map((row) => ({ name: row.name, preview: row.preview.slice(0, 300), ...(row.when ? { when: row.when } : {}) }));
+}
+
+/** Everyone in an inbox-check run's conversation list: names and time labels, no message text. */
+export function conversationsFromInbox(data: unknown): { name: string; when?: string }[] {
+  return parseEach((data as { conversations?: unknown } | null)?.conversations, inboxRow).map((row) => ({
+    name: row.name,
+    ...(row.when ? { when: row.when } : {}),
+  }));
 }
 
 // One malformed row from an agent's output should cost that row, not the batch.

@@ -124,7 +124,8 @@ export async function draftStep(input: {
   company: Pick<Company, "name" | "domain" | "description" | "fitSummary" | "hook"> | null;
   signals: Pick<Signal, "kind" | "title" | "detail" | "strength">[];
   history: Pick<Message, "channel" | "direction" | "subject" | "body" | "sentAt">[];
-  priorThreads?: number;
+  // How the owner already knows them (describeInTouch), when they do.
+  inTouch?: string | undefined;
 }): Promise<{ subject: string | null; body: string }> {
   const step = input.campaign.steps[input.stepIndex];
   if (!step) throw new Error("Campaign step does not exist.");
@@ -171,8 +172,8 @@ export async function draftStep(input: {
       ),
       untrusted("signals", signalLines(input.signals) || "none"),
       history ? `Previous messages in this sequence:\n${history}` : "No previous messages.",
-      input.priorThreads
-        ? `The sender already has ${input.priorThreads} earlier email thread(s) with this person outside this campaign. They know each other: do not write a cold introduction.`
+      input.inTouch
+        ? `The sender is already in touch with this person outside this campaign (${input.inTouch}). They know each other: do not write a cold introduction.`
         : "",
       "",
       `Use their first name (${input.person.name.split(/\s+/)[0]}). Write the message now.`,

@@ -42,11 +42,12 @@ export function Prospects({
       return next;
     });
 
-  const act = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
+  const act = (work: () => Promise<{ ok: boolean; error?: string; message?: string }>, success: string) =>
     startTransition(async () => {
       const result = await work();
       if (!result.ok) return void toast.error(result.error ?? "Failed");
-      toast.success(success);
+      if (result.message) toast.warning(result.message);
+      else toast.success(success);
       setSelected(new Set());
       router.refresh();
     });

@@ -26,6 +26,12 @@ mirror) on 2026-10-31. That sync/backfill/analysis machinery is gone.
    the step as sent.
 2. **Replies stop sequences.** Before any send to someone already contacted,
    Gmail is re-checked for a reply. A reply (or bounce) skips open drafts.
+   **People the owner already talks to aren't cold-sequenced.** Enroll holds
+   back anyone with a Gmail thread Threadline didn't start or a conversation
+   in the latest LinkedIn inbox list, and every send re-checks Gmail (after the
+   first send: only mail since it, outside the sequence). A failed check sends
+   nothing. Only the owner's "Include anyway" (`metadata.inTouchOverride`)
+   lifts it.
 3. **Owner-only.** Pages go through `requireOwner()`; every server action
    starts with `assertOwner()` (via `run()` in `app/(app)/actions.ts`); machine
    routes check a bearer secret in constant time (`lib/auth/machine.ts`).
@@ -76,12 +82,17 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 3. **Find people** (`findPeopleForCompany`): YC founder page → Apollo (if key)
    → LinkedIn search (if connected, only when <2 found). Missing emails get a
    `first@domain` guess (only if the domain has MX), marked `guessed`.
-4. **Enroll** sets `stage=active, nextStep=0, nextStepAt=now` and calls
+4. **Enroll** first runs the "already in touch" check (`inTouchWith`: Gmail
+   threads not ours + `runtime.linkedinConversations` by name) and stores the
+   finding on `people.metadata.inTouch`; those people stay `new` unless
+   included anyway, and drafts for included ones are told not to write a cold
+   intro. The rest get `stage=active, nextStep=0, nextStepAt=now` and
    `draftDue`, which writes one draft per due step. Steps the person can't
    receive (no email / bounced / no LinkedIn / no X) are recorded as `skipped` and the
    sequence moves on in the same pass.
 5. **Send** (Today): claim the row (`draft|failed → sending`) so double clicks
-   send once, check daily limits (rolling 24h), re-check replies, send.
+   send once, check daily limits (rolling 24h), re-check replies, re-run the
+   "already in touch" check, send.
    Follow-up emails reuse the Gmail `threadId`, `Re: <first subject>`, and
    `In-Reply-To` = the stored RFC Message-ID. LinkedIn sends wait up to 30s for
    the workflow; otherwise stay `sending` until the next refresh confirms them.
@@ -90,7 +101,9 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
    the person gets 7 days, then closes as `no_reply`.
 7. **Refresh** (daily cron 15:00 UTC + Today's "Check replies"): confirm queued
    LinkedIn workflows, check Gmail threads/addresses for replies and bounces,
-   poll the LinkedIn inbox, then `draftDue`.
+   read the LinkedIn inbox (daily for the conversation list, every 4h while
+   someone reached there is active; the cron waits up to 2 min for it), then
+   `draftDue`.
 
 Stages: `new → active → replied → meeting`, or `closed` (`closedReason`:
 `no_reply`, `owner`, …). Message statuses: `draft | sending | sent | failed |
@@ -158,8 +171,10 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BRO
   return a fixed outcome enum; the worker only allows linkedin.com navigation.
   Sends still only start from the owner's click.
   The inbox check reads the conversation list without opening threads (opening
-  marks them read) and matches replies by name; it runs at most every 4h and is
-  collected on a later refresh. A person search that outlasts its wait leaves
+  marks them read) and matches replies by name; it runs at most every 4h (and
+  daily regardless, to keep `runtime.linkedinConversations` fresh). The cron
+  waits for it; a manual refresh collects it on a later click. An empty read
+  never replaces the last good list. A person search that outlasts its wait leaves
   its run id in `companies.metadata.linkedinSearchRun` for the next click.
 - The worker runs one LinkedIn task at a time (queue) and never logs task
   text, page content or cookies. If it restarts mid-run, that run fails with

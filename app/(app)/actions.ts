@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -204,12 +204,36 @@ export async function setCompanyStatusAction(companyIds: string[], status: "new"
 // ── Sequences ───────────────────────────────────────────────────────────────
 
 export async function enrollAction(personIds: string[], campaignId: string) {
-  return run(() => enroll(uuids.max(25).parse(personIds), uuid.parse(campaignId)), ["/", "/prospects/[id]", "/campaigns"]);
+  return withHeldBack(
+    await run(() => enroll(uuids.max(25).parse(personIds), uuid.parse(campaignId)), ["/", "/prospects/[id]", "/campaigns"]),
+  );
+}
+
+// Enroll holds back people the owner is already in touch with; say who.
+function withHeldBack<T extends { enrolled: number; heldBack: string[] }>(result: ActionResult<T>): ActionResult<T> {
+  if (!result.ok || !result.data.heldBack.length) return result;
+  const { enrolled, heldBack } = result.data;
+  const names = heldBack.length > 3 ? `${heldBack.slice(0, 3).join(", ")} and ${heldBack.length - 3} more` : heldBack.join(", ");
+  return {
+    ...result,
+    message: `${enrolled ? `Enrolled ${enrolled}. ` : ""}Held back ${names}: you're already in touch. Choose "Include anyway" on their row to enroll them.`,
+  };
+}
+
+// The owner knows this person and wants them in a sequence anyway: the "already
+// in touch" check stops holding them back and stops blocking their sends.
+export async function includeAnywayAction(personId: string) {
+  return run(async () => {
+    await getDatabase()
+      .update(people)
+      .set({ metadata: sql`${people.metadata} || '{"inTouchOverride": true}'::jsonb`, updatedAt: new Date() })
+      .where(eq(people.id, uuid.parse(personId)));
+  }, ["/", "/prospects/[id]"]);
 }
 
 // Enrolls every person at the given companies who has a usable channel.
 export async function enrollCompaniesAction(companyIds: string[], campaignId: string) {
-  return run(async () => {
+  return withHeldBack(await run(async () => {
     const rows = await getDatabase()
       .select({ id: people.id })
       .from(people)
@@ -220,7 +244,7 @@ export async function enrollCompaniesAction(companyIds: string[], campaignId: st
       rows.map((r) => r.id),
       uuid.parse(campaignId),
     );
-  }, ["/", "/prospects", "/campaigns"]);
+  }, ["/", "/prospects", "/campaigns"]));
 }
 
 export async function sendAction(

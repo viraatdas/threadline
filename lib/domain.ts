@@ -86,3 +86,30 @@ export const X_CAMPAIGN = {
     { channel: "x_dm", waitDays: 5, guidance: "Short, friendly last nudge with one concrete detail (setup is one line). No guilt." },
   ] satisfies CampaignStep[],
 };
+
+// Contact the owner has had outside Threadline, stored on people.metadata.inTouch
+// by the engine's check at enroll and before each send.
+export const inTouchSchema = z.object({
+  gmail: z.object({ threads: z.number(), lastAt: z.string().nullable() }).optional(),
+  linkedin: z.object({ when: z.string().nullable() }).optional(),
+  checkedAt: z.string(),
+});
+export type InTouch = z.infer<typeof inTouchSchema>;
+
+export function readInTouch(metadata: Record<string, unknown>): InTouch | null {
+  const parsed = inTouchSchema.safeParse(metadata.inTouch);
+  return parsed.success ? parsed.data : null;
+}
+
+export function describeInTouch(touch: InTouch) {
+  const day = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
+  return [
+    touch.gmail
+      ? `${touch.gmail.threads === 1 ? "an email thread" : `${touch.gmail.threads} email threads`}${touch.gmail.lastAt ? `, last ${day(touch.gmail.lastAt)}` : ""}`
+      : null,
+    touch.linkedin ? `a LinkedIn conversation${touch.linkedin.when ? `, last ${touch.linkedin.when}` : ""}` : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
+}

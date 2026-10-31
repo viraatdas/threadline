@@ -10,6 +10,7 @@ import {
   deletePersonAction,
   enrollAction,
   findPeopleAction,
+  includeAnywayAction,
   researchAction,
   revealEmailAction,
   setCompanyStatusAction,
@@ -17,7 +18,7 @@ import {
 } from "@/app/(app)/actions";
 import { Button, Empty, Field, Input, Score, Section, Select, Status, relativeTime } from "@/components/ui";
 import type { Message, Person } from "@/lib/db/schema";
-import { CHANNEL_LABELS } from "@/lib/domain";
+import { CHANNEL_LABELS, describeInTouch, readInTouch } from "@/lib/domain";
 import type { CompanyData } from "@/lib/queries";
 
 const STAGE_TONE = { new: "neutral", active: "blue", replied: "accent", meeting: "accent", closed: "neutral" } as const;
@@ -194,15 +195,18 @@ function PersonRow({
   const [linkedinUrl, setLinkedinUrl] = useState(person.linkedinUrl ?? "");
   const [open, setOpen] = useState(false);
 
-  const act = (work: () => Promise<{ ok: true } | { ok: false; error: string }>, success?: string) =>
+  const act = (work: () => Promise<{ ok: true; message?: string } | { ok: false; error: string }>, success?: string) =>
     startTransition(async () => {
       const result = await work();
       if (!result.ok) return void toast.error(result.error);
-      if (success) toast.success(success);
+      if (result.message) toast.warning(result.message);
+      else if (success) toast.success(success);
       router.refresh();
     });
 
   const sent = messages.filter((m) => m.status === "sent" || m.status === "received");
+  const inTouch = readInTouch(person.metadata);
+  const included = person.metadata.inTouchOverride === true;
 
   return (
     <li className="py-3">
@@ -239,6 +243,12 @@ function PersonRow({
                 X
               </a>
             ) : null}
+            {inTouch ? (
+              <Status tone={included ? "neutral" : "warning"}>
+                in touch: {describeInTouch(inTouch)}
+                {included ? " · included anyway" : ""}
+              </Status>
+            ) : null}
             {sent.length ? (
               <button type="button" className="underline-offset-2 hover:underline" onClick={() => setOpen(!open)}>
                 {sent.length} message{sent.length === 1 ? "" : "s"}
@@ -260,11 +270,16 @@ function PersonRow({
                 size="sm"
                 variant="primary"
                 disabled={pending || !campaignId}
-                onClick={() => act(() => enrollAction([person.id], campaignId).then((r) => (r.ok ? { ok: true as const } : r)), "Enrolled — draft is on Today")}
+                onClick={() => act(() => enrollAction([person.id], campaignId), "Enrolled — draft is on Today")}
               >
                 Enroll
               </Button>
             </>
+          ) : null}
+          {inTouch && !included && (person.stage === "new" || person.stage === "active") ? (
+            <Button size="sm" disabled={pending} onClick={() => act(() => includeAnywayAction(person.id), "Included — enroll or send as usual")}>
+              Include anyway
+            </Button>
           ) : null}
           {person.stage === "active" ? (
             <Button size="sm" disabled={pending} onClick={() => act(() => updatePersonAction(person.id, { stage: "closed" }).then((r) => (r.ok ? { ok: true as const } : r)), "Sequence stopped")}>
