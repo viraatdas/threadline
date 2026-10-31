@@ -24,6 +24,7 @@ import {
   parseLinkedinTime,
   peopleFromSearch,
   repliesFromInbox,
+  workerConfig,
 } from "@/lib/linkedin";
 import { apolloFindPeople, apolloRevealEmail } from "@/lib/sources/apollo";
 import { domainAcceptsMail, guessEmail } from "@/lib/sources/email-guess";
@@ -310,7 +311,16 @@ async function inTouchWith(person: Person, gmail: GmailClient | null, since?: Da
     const match = linkedinConversations.find((conversation) => nameKey(conversation.name) === nameKey(person.name));
     if (match) found.linkedin = { when: match.when ?? null };
   }
-  return found.gmail || found.linkedin ? found : null;
+  // The same person under another record (a duplicate company, or found once
+  // by email and once on LinkedIn) whom Threadline has already written to.
+  const contacted = await getDatabase()
+    .select({ name: people.name, company: companies.name, lastAt: people.lastContactedAt })
+    .from(people)
+    .leftJoin(companies, eq(companies.id, people.companyId))
+    .where(and(ne(people.id, person.id), isNotNull(people.lastContactedAt)));
+  const twin = contacted.find((other) => nameKey(other.name) === nameKey(person.name));
+  if (twin) found.threadline = { company: twin.company, lastAt: twin.lastAt?.toISOString() ?? null };
+  return found.gmail || found.linkedin || found.threadline ? found : null;
 }
 
 // Replaces any earlier finding; drafts read it so someone the owner includes
@@ -936,13 +946,60 @@ export async function refresh(options: { inboxWaitMs?: number } = {}) {
     return 0;
   });
   const drafts = await draftDue({ limit: 30 });
-  await saveRuntimeState({ lastRefreshAt: new Date().toISOString() });
+  const health = await checkHealth().catch(() => ["Health check failed to run."]);
+  const found = [...new Set([...health, ...problems, ...drafts.errors])];
+  const now = new Date().toISOString();
+  await saveRuntimeState({ lastRefreshAt: now, health: { checkedAt: now, problems: found.slice(0, 10) } });
   return {
     replies: emailReplies + linkedinReplies,
     drafted: drafts.drafted,
     closed: drafts.closed,
-    problems: [...problems, ...drafts.errors],
+    problems: found,
   };
+}
+
+// Everything sending and reply detection depend on, checked on every refresh
+// (hourly) so a broken piece shows on Today instead of surfacing at send time.
+async function checkHealth(): Promise<string[]> {
+  const problems: string[] = [];
+  try {
+    const gmail = await GmailClient.load();
+    if (!gmail) problems.push("Gmail isn't connected, so emails can't send and replies aren't seen. Connect it in Settings.");
+    else await gmail.verify();
+  } catch (error) {
+    problems.push(`Gmail stopped working (${describeError(error)}). Reconnect it in Settings.`);
+  }
+  const config = workerConfig();
+  if (config) {
+    try {
+      const status = await new LinkedinClient(config).status();
+      if (!status.linkedin.signedIn) problems.push("LinkedIn is signed out. Sign in again in Settings.");
+      if (status.home && !status.home.online) {
+        problems.push("The home connection (Jetson) is offline, so LinkedIn actions are waiting.");
+      }
+    } catch (error) {
+      problems.push(`The LinkedIn browser worker isn't answering (${describeError(error)}).`);
+    }
+  }
+  const database = getDatabase();
+  const [stuck] = await database
+    .select({ value: sql<number>`count(*)::int` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.status, "sending"),
+        inArray(messages.channel, LINKEDIN_CHANNELS),
+        lte(messages.sentAt, new Date(Date.now() - 3 * 60 * 60 * 1000)),
+      ),
+    );
+  if (stuck?.value) {
+    problems.push(`${stuck.value} LinkedIn ${stuck.value === 1 ? "action has" : "actions have"} been queued for over 3 hours.`);
+  }
+  const { linkedinConversationsAt } = await loadRuntimeState();
+  if (config && linkedinConversationsAt && Date.now() - Date.parse(linkedinConversationsAt) > 2 * DAY) {
+    problems.push("The LinkedIn inbox hasn't been read in over 2 days, so LinkedIn replies and conversations may be missed.");
+  }
+  return problems;
 }
 
 // Drizzle wraps driver errors as "Failed query: <sql>"; the cause is the part

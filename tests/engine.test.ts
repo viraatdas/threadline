@@ -53,6 +53,9 @@ vi.mock("@/lib/gmail", () => ({
         return { threads: threads.length, lastAt: threads.length ? new Date(last) : null };
       },
       findReply: async (input: { email?: string | null }) => (input.email === harness.replyFrom ? harness.reply : null),
+      verify: async () => {
+        if (harness.gmailDown) throw new Error("Gmail API request failed (HTTP 401).");
+      },
     }),
   },
 }));
@@ -515,6 +518,19 @@ describe("already in touch", () => {
     expect(await engine.sendMessage(followUp.id)).toEqual({ status: "sent" });
   });
 
+  it("holds back a second record of someone Threadline already wrote to", async () => {
+    const first = await addPerson("Dee Dupe", "dee@one.dev");
+    await engine.enroll([first.id], warmCampaignId);
+    const [draft] = await draftsFor(first.id);
+    expect(await engine.sendMessage(draft!.id)).toEqual({ status: "sent" });
+
+    const second = await addPerson("Dee Dupe", "dee@two.dev");
+    expect(await engine.enroll([second.id], warmCampaignId)).toMatchObject({ enrolled: 0, heldBack: ["Dee Dupe"] });
+    const byId = async (id: string) => (await db.select().from(schema.people).where(eq(schema.people.id, id)))[0]!;
+    expect((await byId(first.id)).metadata).not.toHaveProperty("inTouch");
+    expect((await byId(second.id)).metadata).toMatchObject({ inTouch: { threadline: { company: "Dee Dupe Co" } } });
+  });
+
   it("keeps the last good conversation list when an inbox read comes back empty", async () => {
     await saveRuntimeState({
       linkedinInboxRun: "inbox-run",
@@ -541,3 +557,45 @@ describe("already in touch", () => {
     ]);
   });
 });
+
+describe("health", () => {
+  it("records what's broken on each refresh and clears it once fixed", async () => {
+    harness.gmailDown = true;
+    await engine.refresh();
+    expect((await loadRuntimeState()).health?.problems).toEqual(
+      expect.arrayContaining([expect.stringContaining("Gmail stopped working (Gmail API request failed (HTTP 401).)")]),
+    );
+    harness.gmailDown = false;
+    await engine.refresh();
+    expect((await loadRuntimeState()).health?.problems.some((problem) => problem.startsWith("Gmail"))).toBe(false);
+  });
+
+  it("flags LinkedIn actions stuck in the queue", async () => {
+    const [someone] = await db.select().from(schema.people).limit(1);
+    const [stuck] = await db
+      .insert(schema.messages)
+      .values({
+        personId: someone!.id,
+        channel: "linkedin_message",
+        status: "sending",
+        body: "x",
+        sentAt: new Date(Date.now() - 4 * 3600_000),
+      })
+      .returning();
+    await engine.refresh();
+    expect((await loadRuntimeState()).health?.problems).toContain("1 LinkedIn action has been queued for over 3 hours.");
+    await db.delete(schema.messages).where(eq(schema.messages.id, stuck!.id));
+  });
+
+  it("merges concurrent runtime saves instead of overwriting", async () => {
+    await Promise.all([
+      saveRuntimeState({ linkedinInboxCheckedAt: "2026-10-31T01:00:00.000Z" }),
+      saveRuntimeState({ lastRefreshAt: "2026-10-31T02:00:00.000Z" }),
+    ]);
+    expect(await loadRuntimeState()).toMatchObject({
+      linkedinInboxCheckedAt: "2026-10-31T01:00:00.000Z",
+      lastRefreshAt: "2026-10-31T02:00:00.000Z",
+    });
+  });
+});
+

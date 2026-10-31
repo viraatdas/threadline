@@ -74,6 +74,11 @@ export async function loadToday() {
     .orderBy(asc(people.nextStepAt))
     .limit(1);
 
+  // The hourly job (Fly machine threadline-hourly-sync) records what it found
+  // broken in runtime.health; if it stops running, that's a problem too.
+  const runtime = await loadRuntimeState();
+  const stale = !runtime.lastRefreshAt || now.getTime() - Date.parse(runtime.lastRefreshAt) > 3 * 60 * 60 * 1000;
+
   return {
     queue,
     replies,
@@ -83,7 +88,11 @@ export async function loadToday() {
       active: active?.value ?? 0,
       nextDueAt: nextDue?.at ?? null,
     },
-    runtime: await loadRuntimeState(),
+    runtime,
+    attention: [
+      ...(runtime.health?.problems ?? []),
+      ...(stale ? ["Background checks haven't run in over 3 hours, so replies and problems aren't being picked up."] : []),
+    ],
   };
 }
 

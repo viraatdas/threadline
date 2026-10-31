@@ -1,6 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { getDatabase } from "@/lib/db/client";
 import { connections, settings as settingsTable } from "@/lib/db/schema";
@@ -135,6 +135,9 @@ export async function loadApiKey(provider: "github" | "apollo"): Promise<string 
 
 interface RuntimeState {
   lastRefreshAt?: string;
+  // What the last refresh found broken (Gmail, LinkedIn, the home route, stuck
+  // sends) or failed at; Today shows it.
+  health?: { checkedAt: string; problems: string[] };
   linkedinInboxCheckedAt?: string;
   // Browser worker run reading the LinkedIn inbox, collected on a later refresh.
   linkedinInboxRun?: string | null;
@@ -154,10 +157,15 @@ export async function loadRuntimeState(): Promise<RuntimeState> {
   return (row?.value ?? {}) as RuntimeState;
 }
 
+// Merged in the database, so the cron and a click on "Check replies" running
+// at once can't overwrite each other's fields.
 export async function saveRuntimeState(patch: RuntimeState): Promise<void> {
-  const next = { ...(await loadRuntimeState()), ...patch };
+  const value = JSON.parse(JSON.stringify(patch)) as Record<string, unknown>;
   await getDatabase()
     .insert(settingsTable)
-    .values({ id: "runtime", value: { ...next } })
-    .onConflictDoUpdate({ target: settingsTable.id, set: { value: { ...next }, updatedAt: new Date() } });
+    .values({ id: "runtime", value })
+    .onConflictDoUpdate({
+      target: settingsTable.id,
+      set: { value: sql`${settingsTable.value} || ${JSON.stringify(value)}::jsonb`, updatedAt: new Date() },
+    });
 }

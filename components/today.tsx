@@ -15,6 +15,7 @@ export function Today({ data }: { data: TodayData }) {
   const drafts = data.queue.filter((row) => row.message.status === "draft");
   const failed = data.queue.filter((row) => row.message.status === "failed");
   const pending = data.queue.filter((row) => row.message.status === "sending");
+  const problems = data.attention;
 
   const onRefresh = () =>
     startRefresh(async () => {
@@ -47,6 +48,23 @@ export function Today({ data }: { data: TodayData }) {
           </Button>
         </div>
       </div>
+
+      {problems.length ? (
+        <div role="status" className="mt-6 rounded-[10px] border border-warning/50 bg-warning/5 px-4 py-3 text-[13px] leading-6">
+          <p className="flex items-center gap-2 font-medium text-ink">
+            <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
+            Needs attention
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-ink-muted">
+            {problems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+          <Link href="/settings" className="mt-1 inline-block font-medium text-accent-strong underline-offset-2 hover:underline">
+            Open Settings
+          </Link>
+        </div>
+      ) : null}
 
       {data.replies.length ? (
         <Section title={`Replies (${data.replies.length})`} description="They wrote back. Sequences stop automatically; decide what's next.">

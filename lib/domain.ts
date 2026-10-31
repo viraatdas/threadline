@@ -92,6 +92,8 @@ export const X_CAMPAIGN = {
 export const inTouchSchema = z.object({
   gmail: z.object({ threads: z.number(), lastAt: z.string().nullable() }).optional(),
   linkedin: z.object({ when: z.string().nullable() }).optional(),
+  // Threadline already wrote to someone with this name under another record.
+  threadline: z.object({ company: z.string().nullable(), lastAt: z.string().nullable() }).optional(),
   checkedAt: z.string(),
 });
 export type InTouch = z.infer<typeof inTouchSchema>;
@@ -109,6 +111,9 @@ export function describeInTouch(touch: InTouch) {
       ? `${touch.gmail.threads === 1 ? "an email thread" : `${touch.gmail.threads} email threads`}${touch.gmail.lastAt ? `, last ${day(touch.gmail.lastAt)}` : ""}`
       : null,
     touch.linkedin ? `a LinkedIn conversation${touch.linkedin.when ? `, last ${touch.linkedin.when}` : ""}` : null,
+    touch.threadline
+      ? `Threadline already wrote to them as another record${touch.threadline.company ? ` at ${touch.threadline.company}` : ""}${touch.threadline.lastAt ? `, last ${day(touch.threadline.lastAt)}` : ""}`
+      : null,
   ]
     .filter(Boolean)
     .join(" and ");

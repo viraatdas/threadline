@@ -102,8 +102,11 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 7. **Refresh** (daily cron 15:00 UTC + Today's "Check replies"): confirm queued
    LinkedIn workflows, check Gmail threads/addresses for replies and bounces,
    read the LinkedIn inbox (daily for the conversation list, every 4h while
-   someone reached there is active; the cron waits up to 2 min for it), then
-   `draftDue`.
+   someone reached there is active; the cron waits up to 2 min for it),
+   `draftDue`, then `checkHealth` (Gmail grant works, LinkedIn signed in, home
+   route online, no LinkedIn action queued >3h, inbox read within 2 days).
+   What it finds, plus any refresh errors, goes to `runtime.health` and shows
+   as "Needs attention" on Today, as does a refresh older than 3h.
 
 Stages: `new → active → replied → meeting`, or `closed` (`closedReason`:
 `no_reply`, `owner`, …). Message statuses: `draft | sending | sent | failed |

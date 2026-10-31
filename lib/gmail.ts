@@ -158,6 +158,11 @@ export class GmailClient {
     return tokens.access_token;
   }
 
+  /** Throws if the stored grant no longer works (revoked, expired, API off). */
+  async verify(): Promise<void> {
+    await fetchJson(`${API}/profile`, await this.token());
+  }
+
   async send(input: {
     fromName: string;
     to: string;
