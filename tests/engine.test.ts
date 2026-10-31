@@ -316,3 +316,50 @@ describe("page loaders", () => {
     expect(settings.gmail).toBeNull();
   });
 });
+
+describe("X", () => {
+  it("imports a poster from bird, drafts an X DM, and records it sent without any API call", async () => {
+    const { parseBirdSearch } = await import("@/lib/sources/x");
+    const found = parseBirdSearch(
+      JSON.stringify([
+        {
+          id: "9001",
+          text: "our macos runners are so slow",
+          author: { username: "pat_ships", name: "Pat Ships" },
+          authorId: "77",
+          _raw: { core: { user_results: { result: { legacy: { description: "founder", followers_count: 300 } } } } },
+        },
+      ]),
+    );
+    const first = await ingest(found);
+    const again = await ingest(found);
+    expect(first).toMatchObject({ newCompanies: 1, newPeople: 1 });
+    expect(again).toMatchObject({ newCompanies: 0, newPeople: 0, signals: 0 });
+    const pat = await person("Pat Ships");
+    expect(pat).toMatchObject({ twitterUrl: "https://x.com/pat_ships", metadata: { xUserId: "77" } });
+
+    const [xCampaign] = await db
+      .insert(schema.campaigns)
+      .values({
+        name: "Saw your post",
+        angle: "They posted about it.",
+        steps: [
+          { channel: "x_dm", waitDays: 0, guidance: "" },
+          { channel: "email", waitDays: 3, guidance: "" },
+        ],
+      })
+      .returning();
+    await engine.enroll([pat.id], xCampaign!.id);
+    const [dm] = await draftsFor(pat.id);
+    expect(dm).toMatchObject({ channel: "x_dm", status: "draft" });
+
+    const sentBefore = harness.sent.length;
+    const startsBefore = harness.linkedinStarts.length;
+    expect(await engine.sendMessage(dm!.id, { body: "edited dm" })).toEqual({ status: "sent" });
+    expect(harness.sent).toHaveLength(sentBefore);
+    expect(harness.linkedinStarts).toHaveLength(startsBefore);
+    const [after] = await draftsFor(pat.id);
+    expect(after).toMatchObject({ status: "sent", body: "edited dm" });
+    expect(await person("Pat Ships")).toMatchObject({ nextStep: 1, stage: "active" });
+  });
+});

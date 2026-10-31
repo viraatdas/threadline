@@ -135,6 +135,7 @@ export async function draftStep(input: {
       : "A follow-up email in the same thread. Leave subject empty. Body: under 50 words, adds one new concrete detail, no 'just bumping this', no signature.",
     linkedin_invite: `A LinkedIn connection note. Leave subject empty. Body: at most ${input.settings.inviteNoteLimit} characters including spaces. Friendly, specific, no hard pitch, no links.`,
     linkedin_message: "A LinkedIn message to someone now connected. Leave subject empty. Body: under 60 words, conversational, one question, at most one link.",
+    x_dm: "An X (Twitter) DM to someone whose post we saw (it is in the signals). Leave subject empty. Body: under 45 words, lower-key than email, refer to what they posted in a few words without quoting it back at length, one question, at most one link.",
   };
   const history = input.history
     .filter((m) => m.direction === "in" || m.sentAt)

@@ -6,13 +6,15 @@ export type PersonStage = (typeof PERSON_STAGES)[number];
 export const COMPANY_STATUSES = ["new", "target", "archived"] as const;
 export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
 
-export const CHANNELS = ["email", "linkedin_invite", "linkedin_message"] as const;
+export const CHANNELS = ["email", "linkedin_invite", "linkedin_message", "x_dm"] as const;
 export type Channel = (typeof CHANNELS)[number];
+export const LINKEDIN_CHANNELS = ["linkedin_invite", "linkedin_message"] as const satisfies Channel[];
 
 export const CHANNEL_LABELS: Record<Channel, string> = {
   email: "Email",
   linkedin_invite: "LinkedIn invite",
   linkedin_message: "LinkedIn message",
+  x_dm: "X DM",
 };
 
 export const campaignStepSchema = z.object({
@@ -69,5 +71,18 @@ export const DEFAULT_CAMPAIGN = {
     { channel: "email", waitDays: 3, guidance: "Reply in thread. Add one new concrete detail (price per build, setup is one line). Two sentences." },
     { channel: "linkedin_message", waitDays: 4, guidance: "Only if connected. Casual, one question." },
     { channel: "email", waitDays: 5, guidance: "Polite close-the-loop. Offer $5 free credit link. No guilt." },
+  ] satisfies CampaignStep[],
+};
+
+// For people found through their own posts on X (`pnpm scout x`). X DMs are
+// opened prefilled on Today and sent by the owner inside X.
+export const X_CAMPAIGN = {
+  name: "Saw your post on X",
+  angle:
+    "They posted about Mac build pain, Mac minis for agents, or macOS CI. Reply to what they actually said, as a fellow builder. Offstage gives them a fresh M5 Max per job or agent session, pay per second at $0.78/hr, `runs-on: offstage-macos` for CI.",
+  steps: [
+    { channel: "x_dm", waitDays: 0, guidance: "Reference their post in a few words. One line on Offstage. Ask if it would help." },
+    { channel: "email", waitDays: 3, guidance: "Only if we have their email. Two sentences: the post, the offer." },
+    { channel: "x_dm", waitDays: 5, guidance: "Short, friendly last nudge with one concrete detail (setup is one line). No guilt." },
   ] satisfies CampaignStep[],
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, UserRound, Mail, Plus, Search, Sparkles } from "lucide-react";
+import { AtSign, ExternalLink, UserRound, Mail, Plus, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -231,6 +231,12 @@ function PersonRow({
               <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
                 <UserRound className="size-3" aria-hidden="true" />
                 LinkedIn
+              </a>
+            ) : null}
+            {person.twitterUrl ? (
+              <a href={person.twitterUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
+                <AtSign className="size-3" aria-hidden="true" />
+                X
               </a>
             ) : null}
             {sent.length ? (

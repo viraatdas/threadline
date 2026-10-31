@@ -19,11 +19,12 @@ Find → Research → Enroll → Approve → Reply.
 
 - **Find** companies with evidence of Mac pain: GitHub workflows on macOS
   runners, YC companies shipping Apple-platform apps or agents, Hacker News
-  launches, Bookface via the YC CLI, pasted lists.
+  launches, people posting about it on X (via `bird`), Bookface via the YC
+  CLI, pasted lists.
 - **Research** reads their site and signals and scores fit 0–100 with a
   one-line reason and a concrete hook.
-- **Enroll** the right people in a campaign (an angle plus a few email and
-  LinkedIn steps).
+- **Enroll** the right people in a campaign (an angle plus a few email,
+  LinkedIn and X DM steps).
 - **Approve** each drafted message on Today — edit, send, skip, or rewrite.
 - **Reply** detection stops the sequence; the founder takes it from there.
 

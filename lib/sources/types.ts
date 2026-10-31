@@ -9,6 +9,7 @@ export const SIGNAL_KINDS = [
   "website",
   "hiring",
   "linkedin",
+  "x",
   "manual",
 ] as const;
 export type SignalKind = (typeof SIGNAL_KINDS)[number];
@@ -33,6 +34,8 @@ export interface FoundPerson {
   emailStatus?: "found" | "guessed" | undefined;
   linkedinUrl?: string | undefined;
   twitterUrl?: string | undefined;
+  // Numeric X account id; lets Today open a DM to them prefilled.
+  xUserId?: string | undefined;
   location?: string | undefined;
 }
 

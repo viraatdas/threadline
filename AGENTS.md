@@ -21,6 +21,9 @@ mirror) on 2026-10-31. That sync/backfill/analysis machinery is gone.
    is the only code path that contacts a prospect, and only Today's Send
    button (`sendAction`) calls it, for one draft at a time. Crons and refreshes
    draft, detect replies, and confirm queued LinkedIn actions; they never send.
+   X DMs never leave the server at all: Today opens X's compose screen
+   prefilled and the owner presses send inside X; `sendMessage` only records
+   the step as sent.
 2. **Replies stop sequences.** Before any send to someone already contacted,
    Gmail is re-checked for a reply. A reply (or bounce) skips open drafts.
 3. **Owner-only.** Pages go through `requireOwner()`; every server action
@@ -49,7 +52,7 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | --- | --- |
 | `lib/domain.ts` | Stages, channels, campaign step schema, settings schema + Offstage defaults, the default campaign. |
 | `lib/db/schema.ts` | 7 tables: `connections`, `settings`, `companies`, `people`, `signals`, `campaigns`, `messages`. Text columns typed in TS — no pg enums. |
-| `lib/sources/` | Pure fetch+parse finders returning `FindResult` (`types.ts`): `yc.ts` (YC directory, YC company pages → founders, YC CLI JSON), `github.ts` (macOS CI workflows), `hn.ts`, `website.ts` (SSRF-guarded scrape), `apollo.ts`, `email-guess.ts`. Never touch the DB. |
+| `lib/sources/` | Pure fetch+parse finders returning `FindResult` (`types.ts`): `yc.ts` (YC directory, YC company pages → founders, YC CLI JSON), `github.ts` (macOS CI workflows), `hn.ts`, `x.ts` (parses `bird search --json-full`: poster → person, bio link → company), `website.ts` (SSRF-guarded scrape), `apollo.ts`, `email-guess.ts`. Never touch the DB. |
 | `lib/ingest.ts` | Upserts `FindResult`s: dedupes companies by domain/GitHub login/YC slug, people by email/LinkedIn/name-at-company, signals by `dedupeKey`. Fills gaps only. |
 | `lib/engine.ts` | Research, find people, enroll, draft due steps, send, skip, reply/bounce detection, `refresh()`. |
 | `lib/ai.ts` | `researchCompany` (Haiku: score 0–100, fit, hook, titles) and `draftStep` (Sonnet). |
@@ -60,7 +63,7 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), Campaigns, Settings; `actions.ts` holds every mutation. |
 | `app/api/` | Auth, `integrations/gmail/{connect,callback}`, `cron` (daily refresh), `import` (CLI push). |
 | `components/` | One client component per page + `ui.tsx` primitives + `shell/`. |
-| `scripts/scout.ts` | Local CLI: `pnpm scout yc|yc-json|github|hn` using the owner's own `yc`/`gh` logins, pushing to `/api/import`. |
+| `scripts/scout.ts` | Local CLI: `pnpm scout yc|yc-json|github|hn|x` using the owner's own `yc`/`gh`/`bird` logins, pushing to `/api/import`. |
 
 ## How a prospect moves
 
@@ -74,7 +77,7 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
    `first@domain` guess (only if the domain has MX), marked `guessed`.
 4. **Enroll** sets `stage=active, nextStep=0, nextStepAt=now` and calls
    `draftDue`, which writes one draft per due step. Steps the person can't
-   receive (no email / bounced / no LinkedIn) are recorded as `skipped` and the
+   receive (no email / bounced / no LinkedIn / no X) are recorded as `skipped` and the
    sequence moves on in the same pass.
 5. **Send** (Today): claim the row (`draft|failed → sending`) so double clicks
    send once, check daily limits (rolling 24h), re-check replies, send.
@@ -108,7 +111,7 @@ pnpm dev        pnpm build      pnpm lint       pnpm typecheck
 pnpm test       # vitest: sources, units, engine integration (PGlite, or real
                 # Postgres when TEST_DATABASE_URL is set — that DB is wiped)
 pnpm db:generate  pnpm db:migrate  pnpm db:check
-pnpm scout <yc|yc-json|github|hn> [args] [--dry]
+pnpm scout <yc|yc-json|github|hn|x> [args] [--dry]
 pnpm check      # lint + typecheck + db:check + test + build — before any deploy
 ```
 
@@ -138,7 +141,11 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `LINKED_API_BASE_URL`.
 - The Gmail callback path stays `/api/integrations/gmail/callback` because the
   Google OAuth client and `GMAIL_OAUTH_REDIRECT_URI` are registered with it.
 - `pnpm find` is a pnpm builtin — the CLI is `pnpm scout`.
-- lucide-react 1.x has no brand icons (no `Github`, `Linkedin`).
+- lucide-react 1.x has no brand icons (no `Github`, `Linkedin`, `Twitter`).
+- X: `bird` needs the owner's browser cookies, so it only runs locally via
+  `pnpm scout x`. The X DM link needs the numeric id (`people.metadata.xUserId`,
+  from `authorId`); without it Today opens the profile and copies the text.
+  X replies aren't detected; the owner sets the stage on the prospect.
 - Vercel Hobby crons run at most daily; Today's "Check replies" is the manual
   trigger.
 

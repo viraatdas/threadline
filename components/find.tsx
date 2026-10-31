@@ -1,6 +1,6 @@
 "use client";
 
-import { GitBranch, Newspaper, ClipboardList, Search, Terminal, Sparkles } from "lucide-react";
+import { AtSign, GitBranch, Newspaper, ClipboardList, Search, Terminal, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -56,6 +56,23 @@ export function Find({ availability }: { availability: { github: boolean; linked
           )}
         </SourceRow>
         <HackerNews />
+        <SourceRow
+          icon={<AtSign className="size-4" aria-hidden="true" />}
+          title="X posts (bird)"
+          description={
+            <>
+              People posting about slow macOS runners, Xcode Cloud, or buying Mac minis for agents. Runs on your Mac with{" "}
+              <code className="rounded bg-surface-subtle px-1">bird</code>, which uses your browser&apos;s x.com login, so
+              no X credentials are stored here. Each poster becomes a prospect you can DM from Today.
+            </>
+          }
+        >
+          <pre className="overflow-x-auto rounded-[8px] bg-surface-subtle px-3 py-2 text-[12px] leading-5 text-ink-muted">
+            {`npm i -g @jtsang/bird@0.8.1 && bird whoami
+pnpm scout x                      # default Mac-pain searches
+pnpm scout x "xcode cloud slow"   # your own (comma-separated)`}
+          </pre>
+        </SourceRow>
         <YcCli />
         <Manual />
       </div>

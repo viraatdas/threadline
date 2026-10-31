@@ -14,7 +14,7 @@ import {
   type Message,
   type Person,
 } from "@/lib/db/schema";
-import type { Channel } from "@/lib/domain";
+import { LINKEDIN_CHANNELS, type Channel } from "@/lib/domain";
 import { GmailClient } from "@/lib/gmail";
 import { ingest, upsertPerson } from "@/lib/ingest";
 import { LinkedinClient, normalizeLinkedinUrl, peopleFromSearch } from "@/lib/linkedin";
@@ -37,7 +37,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const FINAL_GRACE_DAYS = 7;
 const CLOSED_FOR_OUTREACH = ["replied", "meeting", "closed"] as const;
 
-const isLinkedin = (channel: Channel) => channel !== "email";
+const isLinkedin = (channel: Channel) => (LINKEDIN_CHANNELS as readonly Channel[]).includes(channel);
 
 async function mapLimit<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -335,9 +335,13 @@ export async function draftDue(options: { personIds?: string[]; limit?: number }
           ? !current.email || current.emailStatus === "bounced"
             ? "No usable email address"
             : null
-          : !current.linkedinUrl
-            ? "No LinkedIn profile"
-            : null;
+          : step.channel === "x_dm"
+            ? !current.twitterUrl
+              ? "No X profile"
+              : null
+            : !current.linkedinUrl
+              ? "No LinkedIn profile"
+              : null;
       const [existing] = await database
         .select({ id: messages.id })
         .from(messages)
@@ -471,7 +475,7 @@ async function sentInLastDay(linkedin: boolean) {
         eq(messages.direction, "out"),
         inArray(messages.status, ["sent", "sending"]),
         gte(messages.sentAt, new Date(Date.now() - DAY)),
-        linkedin ? ne(messages.channel, "email") : eq(messages.channel, "email"),
+        linkedin ? inArray(messages.channel, LINKEDIN_CHANNELS) : eq(messages.channel, "email"),
       ),
     );
   return row?.count ?? 0;
@@ -521,8 +525,8 @@ export async function sendMessage(
   }
   const linkedin = isLinkedin(message.channel);
   const limit = linkedin ? settings.dailyLinkedinLimit : settings.dailyEmailLimit;
-  // The claimed row already counts itself.
-  if ((await sentInLastDay(linkedin)) > limit) {
+  // The claimed row already counts itself. X DMs are sent by hand inside X.
+  if (message.channel !== "x_dm" && (await sentInLastDay(linkedin)) > limit) {
     return fail(`Daily ${linkedin ? "LinkedIn" : "email"} limit (${limit}) reached. Try again tomorrow.`);
   }
   if (person.lastContactedAt) {
@@ -562,6 +566,14 @@ export async function sendMessage(
         subject,
         metadata: sent.rfcMessageId ? { rfcMessageId: sent.rfcMessageId } : {},
       });
+      return { status: "sent" };
+    }
+
+    if (message.channel === "x_dm") {
+      // Today opened X with this text prefilled; the owner presses send there.
+      // There is no X API call here and no way to confirm it beyond their click.
+      if (!person.twitterUrl) return fail("No X profile.");
+      await markSent(message, person, campaign, {});
       return { status: "sent" };
     }
 
@@ -754,7 +766,7 @@ export async function refresh() {
   const pendingLinkedin = await database
     .select()
     .from(messages)
-    .where(and(eq(messages.status, "sending"), ne(messages.channel, "email"), isNotNull(messages.externalId)))
+    .where(and(eq(messages.status, "sending"), inArray(messages.channel, LINKEDIN_CHANNELS), isNotNull(messages.externalId)))
     .limit(20);
   if (pendingLinkedin.length) {
     const client = await LinkedinClient.load();

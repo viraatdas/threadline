@@ -57,6 +57,7 @@ export const findResultSchema = z.object({
               emailStatus: z.enum(["found", "guessed"]).optional(),
               linkedinUrl: optionalText(500),
               twitterUrl: optionalText(500),
+              xUserId: z.string().regex(/^\d{1,25}$/).optional(),
               location: optionalText(200),
             }),
           )
@@ -180,6 +181,7 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
   const identities: SQL[] = [];
   if (email) identities.push(eq(people.email, email));
   if (found.linkedinUrl) identities.push(eq(people.linkedinUrl, found.linkedinUrl));
+  if (found.twitterUrl) identities.push(sql`lower(${people.twitterUrl}) = lower(${found.twitterUrl})`);
   if (companyId) {
     identities.push(and(eq(people.companyId, companyId), sql`lower(${people.name}) = lower(${found.name})`)!);
   }
@@ -198,6 +200,7 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
       twitterUrl: found.twitterUrl ?? null,
       location: found.location ?? null,
       source,
+      ...(found.xUserId ? { metadata: { xUserId: found.xUserId } } : {}),
     });
     return true;
   }
@@ -220,6 +223,7 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
       linkedinUrl: existing.linkedinUrl ?? (linkedinFree ? found.linkedinUrl : null) ?? null,
       twitterUrl: existing.twitterUrl ?? found.twitterUrl ?? null,
       location: existing.location ?? found.location ?? null,
+      ...(found.xUserId && !existing.metadata.xUserId ? { metadata: { ...existing.metadata, xUserId: found.xUserId } } : {}),
       updatedAt: new Date(),
     })
     .where(eq(people.id, existing.id));

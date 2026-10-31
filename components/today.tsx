@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, UserRound, Mail, RefreshCw, RotateCcw, Send, SkipForward } from "lucide-react";
+import { AtSign, ExternalLink, UserRound, Mail, RefreshCw, RotateCcw, Send, SkipForward } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -97,6 +97,16 @@ export function Today({ data }: { data: TodayData }) {
 
 type Row = TodayData["queue"][number];
 
+// X has no DM API we use: Today opens the compose screen with the text
+// prefilled (or the profile, when we lack their numeric id) and the owner
+// presses send inside X.
+function xDestination(person: Row["person"], body: string): string | null {
+  const profile = person.twitterUrl && /^https:\/\/(?:x|twitter)\.com\/\w{1,30}$/i.test(person.twitterUrl) ? person.twitterUrl : null;
+  const id = typeof person.metadata.xUserId === "string" && /^\d{1,25}$/.test(person.metadata.xUserId) ? person.metadata.xUserId : null;
+  if (id) return `https://x.com/messages/compose?recipient_id=${id}&text=${encodeURIComponent(body)}`;
+  return profile;
+}
+
 function DraftCard({ row }: { row: Row }) {
   const { message, person, company, campaign } = row;
   const [subject, setSubject] = useState(message.subject ?? "");
@@ -104,19 +114,27 @@ function DraftCard({ row }: { row: Row }) {
   const [pending, startTransition] = useTransition();
   const [gone, setGone] = useState(false);
   const isEmail = message.channel === "email";
+  const isX = message.channel === "x_dm";
   const firstEmail = isEmail && message.subject !== null;
   const stepCount = campaign?.steps.length ?? 0;
   const limit = message.channel === "linkedin_invite" ? 300 : null;
 
   if (gone) return null;
 
-  const send = () =>
+  const send = () => {
+    if (isX) {
+      // Opened synchronously inside the click so the popup isn't blocked.
+      const destination = xDestination(person, body.trim());
+      if (!destination) return void toast.error("No X profile for this person.");
+      window.open(destination, "_blank", "noopener,noreferrer");
+      void navigator.clipboard?.writeText(body.trim()).catch(() => undefined);
+    }
     startTransition(async () => {
       const result = await sendAction(message.id, { body, ...(firstEmail ? { subject } : {}) });
       if (!result.ok) return void toast.error(result.error);
       const outcome = result.data;
       if (outcome.status === "sent") {
-        toast.success(`Sent to ${person.name}`);
+        toast.success(isX ? `Opened X for ${person.name} — press send there (text is also copied)` : `Sent to ${person.name}`);
         setGone(true);
       } else if (outcome.status === "pending") {
         toast.message(outcome.detail);
@@ -126,6 +144,7 @@ function DraftCard({ row }: { row: Row }) {
         setGone(true);
       } else toast.error(outcome.detail);
     });
+  };
 
   const skip = () =>
     startTransition(async () => {
@@ -165,6 +184,12 @@ function DraftCard({ row }: { row: Row }) {
                   <Status tone="blue">{person.metadata.priorThreads} earlier threads with you</Status>
                 ) : null}
               </span>
+            ) : isX && person.twitterUrl ? (
+              <a href={person.twitterUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
+                <AtSign className="size-3" aria-hidden="true" />
+                {person.twitterUrl.replace(/^https:\/\/(?:x|twitter)\.com\//i, "")}
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </a>
             ) : person.linkedinUrl ? (
               <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
                 <UserRound className="size-3" aria-hidden="true" />
@@ -200,6 +225,7 @@ function DraftCard({ row }: { row: Row }) {
           </p>
         ) : null}
         {isEmail ? <p className="text-[12px] text-ink-faint">Your signature is added when it sends.</p> : null}
+        {isX ? <p className="text-[12px] text-ink-faint">Opens X with this message filled in. You press send there; this step is then marked sent.</p> : null}
       </div>
       <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3">
         <Button variant="ghost" size="sm" onClick={skip} disabled={pending}>
@@ -212,7 +238,7 @@ function DraftCard({ row }: { row: Row }) {
         </Button>
         <Button variant="primary" size="sm" onClick={send} disabled={pending || !body.trim()}>
           <Send className="size-3.5" aria-hidden="true" />
-          {pending ? "Working…" : message.status === "failed" ? "Retry send" : "Send"}
+          {pending ? "Working…" : isX ? "Open in X" : message.status === "failed" ? "Retry send" : "Send"}
         </Button>
       </footer>
     </article>

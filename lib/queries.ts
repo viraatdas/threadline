@@ -4,7 +4,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } 
 
 import { getDatabase } from "@/lib/db/client";
 import { campaigns, companies, messages, people, signals } from "@/lib/db/schema";
-import { DEFAULT_CAMPAIGN } from "@/lib/domain";
+import { DEFAULT_CAMPAIGN, X_CAMPAIGN } from "@/lib/domain";
 import { listConnections, loadApiKey, loadRuntimeState, loadSettings } from "@/lib/store";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -22,6 +22,7 @@ export async function loadToday() {
         email: people.email,
         emailStatus: people.emailStatus,
         linkedinUrl: people.linkedinUrl,
+        twitterUrl: people.twitterUrl,
         metadata: people.metadata,
       },
       company: { id: companies.id, name: companies.name, domain: companies.domain, hook: companies.hook },
@@ -163,7 +164,7 @@ export type CompanyData = NonNullable<Awaited<ReturnType<typeof loadCompany>>>;
 async function ensureDefaultCampaign() {
   const database = getDatabase();
   const [existing] = await database.select({ id: campaigns.id }).from(campaigns).limit(1);
-  if (!existing) await database.insert(campaigns).values(DEFAULT_CAMPAIGN);
+  if (!existing) await database.insert(campaigns).values([DEFAULT_CAMPAIGN, X_CAMPAIGN]);
 }
 
 export async function loadCampaigns() {

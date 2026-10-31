@@ -11,7 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import type { CampaignStep, CompanyStatus, PersonStage } from "@/lib/domain";
+import type { CampaignStep, Channel, CompanyStatus, PersonStage } from "@/lib/domain";
 
 type JsonObject = Record<string, unknown>;
 
@@ -147,7 +147,7 @@ export const messages = pgTable(
       .references(() => people.id, { onDelete: "cascade" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     step: integer("step"),
-    channel: text("channel").$type<"email" | "linkedin_invite" | "linkedin_message">().notNull(),
+    channel: text("channel").$type<Channel>().notNull(),
     direction: text("direction").$type<"out" | "in">().default("out").notNull(),
     status: text("status")
       .$type<"draft" | "sending" | "sent" | "failed" | "skipped" | "received">()

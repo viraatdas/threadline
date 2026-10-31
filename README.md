@@ -1,8 +1,8 @@
 # Outbound
 
 Owner-only outbound for [Offstage](https://offstage.cloud): find teams that
-need Macs for CI or agents, research them with AI, and run email + LinkedIn
-sequences where every message waits for your approval.
+need Macs for CI or agents, research them with AI, and run email, LinkedIn and
+X sequences where every message waits for your approval.
 
 See `AGENTS.md` for how it works and `PRODUCT.md` for why.
 
@@ -15,16 +15,22 @@ See `AGENTS.md` for how it works and `PRODUCT.md` for why.
    pnpm scout yc "ios app, mac ci"   # Bookface search via your `yc` CLI login
    pnpm scout github                 # uses `gh auth token`
    pnpm scout hn --dry               # print without importing
+   pnpm scout x                      # X posts about Mac pain via `bird`
    ```
 
    The CLI posts to `$OUTBOUND_URL/api/import` with `IMPORT_TOKEN` (both in
    `.env.local`). Install the YC CLI with
    `curl -fsSL https://bookface.ycombinator.com/cli/install.sh | bash && yc login`.
+   For X, install `bird` (`npm i -g @jtsang/bird@0.8.1`), stay logged in to
+   x.com in your browser, and check `bird whoami`; `bird` reads those cookies
+   locally and nothing about X is stored on the server.
 
 2. **Prospects** — select companies → *Research with AI* → open the best ones →
    *Find people* → *Enroll*.
-3. **Today** — edit and send each draft. *Check replies* (also runs daily at
-   15:00 UTC) detects replies/bounces and drafts follow-ups that came due.
+3. **Today** — edit and send each draft. X DMs open in X prefilled (you press
+   send there). *Check replies* (also runs daily at 15:00 UTC) detects email
+   and LinkedIn replies/bounces and drafts follow-ups that came due; mark X
+   replies yourself on the prospect.
 
 ## Setup
 
