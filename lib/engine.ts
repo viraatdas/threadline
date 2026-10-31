@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, gte, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 
 import { draftStep, researchCompany } from "@/lib/ai";
 import { getDatabase } from "@/lib/db/client";
@@ -31,7 +31,8 @@ import { domainAcceptsMail, guessEmail } from "@/lib/sources/email-guess";
 import { checkOrgForMacCi } from "@/lib/sources/github";
 import type { FoundPerson } from "@/lib/sources/types";
 import { fetchWebsite } from "@/lib/sources/website";
-import { fetchYcCompany } from "@/lib/sources/yc";
+import { fetchYcCompany, searchYcDirectory } from "@/lib/sources/yc";
+import { rankInputFor, rankPerson } from "@/lib/rank";
 import {
   loadApiKey,
   loadRuntimeState,
@@ -135,7 +136,7 @@ function githubLoginFrom(url: string | undefined) {
 
 // ── People ──────────────────────────────────────────────────────────────────
 
-export async function findPeopleForCompany(companyId: string) {
+export async function findPeopleForCompany(companyId: string, options: { linkedin?: boolean } = {}) {
   const database = getDatabase();
   const [company] = await database.select().from(companies).where(eq(companies.id, companyId)).limit(1);
   if (!company) throw new Error("Company not found.");
@@ -158,7 +159,7 @@ export async function findPeopleForCompany(companyId: string) {
     }
   }
   const pendingSearch = typeof company.metadata.linkedinSearchRun === "string" ? company.metadata.linkedinSearchRun : null;
-  if (found.length < 2 || pendingSearch) {
+  if ((found.length < 2 || pendingSearch) && options.linkedin !== false) {
     const linkedin = await LinkedinClient.load();
     if (linkedin) {
       try {
@@ -187,6 +188,10 @@ export async function findPeopleForCompany(companyId: string) {
   if (!found.length && !notes.length) {
     notes.push("No people found. Connect LinkedIn or add an Apollo key in Settings, or add someone by hand.");
   }
+  await database
+    .update(companies)
+    .set({ metadata: sql`${companies.metadata} || ${JSON.stringify({ peopleSearchedAt: new Date().toISOString() })}::jsonb` })
+    .where(eq(companies.id, company.id));
 
   const acceptsMail = company.domain ? await domainAcceptsMail(company.domain) : false;
   let added = 0;
@@ -233,10 +238,25 @@ export async function revealEmail(personId: string) {
     ...(row.domain ? { domain: row.domain } : {}),
     ...(row.person.linkedinUrl ? { linkedinUrl: row.person.linkedinUrl } : {}),
   });
-  if (!email) return null;
+  // Remembered either way, so the hourly fill doesn't pay to ask twice.
+  const checked = sql`${people.metadata} || ${JSON.stringify({ apolloCheckedAt: new Date().toISOString() })}::jsonb`;
+  if (!email) {
+    await database.update(people).set({ metadata: checked }).where(eq(people.id, personId));
+    return null;
+  }
+  // Someone else on file already has it: the same person twice. Leave both as they are.
+  const [taken] = await database
+    .select({ id: people.id })
+    .from(people)
+    .where(and(eq(people.email, email.toLowerCase()), ne(people.id, personId)))
+    .limit(1);
+  if (taken) {
+    await database.update(people).set({ metadata: checked }).where(eq(people.id, personId));
+    return null;
+  }
   await database
     .update(people)
-    .set({ email: email.toLowerCase(), emailStatus: "found", updatedAt: new Date() })
+    .set({ email: email.toLowerCase(), emailStatus: "found", metadata: checked, updatedAt: new Date() })
     .where(eq(people.id, personId));
   return email;
 }
@@ -915,7 +935,8 @@ const nameKey = (name: string) => name.toLowerCase().normalize("NFKD").replace(/
 // Daily cron + the owner's Refresh button: confirm queued LinkedIn sends,
 // detect replies and bounces, then draft whatever follow-ups came due. The
 // cron passes inboxWaitMs so a LinkedIn inbox read finishes in the same run.
-export async function refresh(options: { inboxWaitMs?: number } = {}) {
+export async function refresh(options: { inboxWaitMs?: number; fill?: boolean } = {}) {
+  const started = Date.now();
   const database = getDatabase();
   const problems: string[] = [];
 
@@ -946,16 +967,152 @@ export async function refresh(options: { inboxWaitMs?: number } = {}) {
     return 0;
   });
   const drafts = await draftDue({ limit: 30 });
+  // The cron leaves room under its 300s limit for the checks that follow.
+  const filled = options.fill
+    ? await fillPipeline(started + 230_000).catch((error: unknown) => ({
+        sourced: 0,
+        researched: 0,
+        peopleFound: 0,
+        emails: 0,
+        problems: [`Hourly fill: ${describeError(error)}`],
+      }))
+    : null;
   const health = await checkHealth().catch(() => ["Health check failed to run."]);
-  const found = [...new Set([...health, ...problems, ...drafts.errors])];
+  const found = [...new Set([...health, ...problems, ...drafts.errors, ...(filled?.problems ?? [])])];
   const now = new Date().toISOString();
   await saveRuntimeState({ lastRefreshAt: now, health: { checkedAt: now, problems: found.slice(0, 10) } });
   return {
     replies: emailReplies + linkedinReplies,
     drafted: drafts.drafted,
     closed: drafts.closed,
+    filled: filled && { sourced: filled.sourced, researched: filled.researched, peopleFound: filled.peopleFound, emails: filled.emails },
     problems: found,
   };
+}
+
+// ── Keeping the CRM full ─────────────────────────────────────────────────────
+// Between visits the hourly job sources companies for each campaign's
+// audience, researches them, finds their people (YC founder pages and Apollo
+// search; LinkedIn searches stay on the owner's click) and looks up a few
+// verified emails for the best-ranked deciders and champions. Bounded per run
+// and per day. It never enrolls or contacts anyone.
+const RESEARCH_PER_RUN = 8;
+const PEOPLE_PER_RUN = 3;
+const APOLLO_LOOKUPS_PER_DAY = 10;
+const FIT_FOR_PEOPLE = 60;
+
+export async function fillPipeline(deadline: number) {
+  const database = getDatabase();
+  const done = { sourced: 0, researched: 0, peopleFound: 0, emails: 0 };
+  const problems: string[] = [];
+  const inTime = () => Date.now() < deadline;
+  const stamp = (key: string) => sql`${companies.metadata} || ${JSON.stringify({ [key]: new Date().toISOString() })}::jsonb`;
+  const state = await loadRuntimeState();
+
+  // A little under a day, so an hourly job lands on each audience daily.
+  const sourcedAt = { ...state.sourcedAt };
+  const audiences = await database
+    .select({ id: campaigns.id, name: campaigns.name, audience: campaigns.audience })
+    .from(campaigns)
+    .where(and(eq(campaigns.active, true), isNotNull(campaigns.audience)));
+  for (const campaign of audiences) {
+    const query = campaign.audience?.trim();
+    const last = sourcedAt[campaign.id];
+    if (!inTime() || !query || (last && Date.now() - Date.parse(last) < DAY - 60 * 60 * 1000)) continue;
+    const found = await searchYcDirectory({ query, limit: 40 });
+    if (!found.companies.length && found.warnings[0]) problems.push(`Sourcing for ${campaign.name}: ${found.warnings[0]}`);
+    else done.sourced += (await ingest(found)).newCompanies;
+    sourcedAt[campaign.id] = new Date().toISOString();
+    await saveRuntimeState({ sourcedAt });
+  }
+
+  // Strongest signals first; a company whose research failed waits a day.
+  const unresearched = await database
+    .select({ id: companies.id })
+    .from(companies)
+    .where(
+      and(
+        isNull(companies.researchedAt),
+        ne(companies.status, "archived"),
+        sql`coalesce((${companies.metadata}->>'researchTriedAt')::timestamptz, 'epoch') < now() - interval '1 day'`,
+      ),
+    )
+    .orderBy(sql`(select max(s.strength) from signals s where s.company_id = "companies"."id") desc nulls last`, desc(companies.createdAt))
+    .limit(RESEARCH_PER_RUN);
+  for (const { id } of unresearched) {
+    if (!inTime()) break;
+    await database.update(companies).set({ metadata: stamp("researchTriedAt") }).where(eq(companies.id, id));
+    try {
+      await researchCompanyById(id);
+      done.researched += 1;
+    } catch (error) {
+      problems.push(`Research: ${describeError(error)}`);
+    }
+  }
+
+  const needPeople = await database
+    .select({ id: companies.id })
+    .from(companies)
+    .where(
+      and(
+        gte(companies.score, FIT_FOR_PEOPLE),
+        ne(companies.status, "archived"),
+        sql`${companies.metadata}->>'peopleSearchedAt' is null`,
+        sql`not exists (select 1 from people p where p.company_id = "companies"."id")`,
+      ),
+    )
+    .orderBy(desc(companies.score))
+    .limit(PEOPLE_PER_RUN);
+  for (const { id } of needPeople) {
+    if (!inTime()) break;
+    try {
+      const result = await findPeopleForCompany(id, { linkedin: false });
+      done.peopleFound += result.added;
+      if (result.notes.some((note) => note.startsWith("Apollo"))) problems.push(result.notes.find((note) => note.startsWith("Apollo"))!);
+    } catch (error) {
+      await database.update(companies).set({ metadata: stamp("peopleSearchedAt") }).where(eq(companies.id, id));
+      problems.push(`Finding people: ${describeError(error)}`);
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  let lookups = state.apolloLookups?.day === today ? state.apolloLookups.count : 0;
+  if (lookups < APOLLO_LOOKUPS_PER_DAY && inTime() && (await loadApiKey("apollo"))) {
+    const candidates = await database
+      .select({ person: people, company: companies })
+      .from(people)
+      .innerJoin(companies, eq(companies.id, people.companyId))
+      .where(
+        and(
+          eq(people.stage, "new"),
+          isNotNull(companies.domain),
+          gte(companies.score, FIT_FOR_PEOPLE),
+          or(isNull(people.emailStatus), eq(people.emailStatus, "guessed")),
+          sql`${people.metadata}->>'apolloCheckedAt' is null`,
+          // Held back as already in touch: not a cold prospect, no lookup needed.
+          sql`(${people.metadata}->'inTouch' is null or ${people.metadata}->>'inTouchOverride' = 'true')`,
+        ),
+      )
+      .limit(300);
+    const best = candidates
+      .map((row) => ({ id: row.person.id, rank: rankPerson(rankInputFor(row.person, row.company)) }))
+      .filter((row) => row.rank.stakeholder === "decider" || row.rank.stakeholder === "champion")
+      .sort((a, b) => b.rank.score - a.rank.score);
+    for (const { id } of best) {
+      if (lookups >= APOLLO_LOOKUPS_PER_DAY || !inTime()) break;
+      lookups += 1;
+      await saveRuntimeState({ apolloLookups: { day: today, count: lookups } });
+      try {
+        if (await revealEmail(id)) done.emails += 1;
+      } catch (error) {
+        problems.push(`Apollo email lookup: ${describeError(error)}`);
+        break;
+      }
+    }
+  }
+
+  await saveRuntimeState({ lastFill: { at: new Date().toISOString(), ...done } });
+  return { ...done, problems: [...new Set(problems)] };
 }
 
 // Everything sending and reply detection depend on, checked on every refresh

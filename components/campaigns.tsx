@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -45,10 +46,18 @@ export function Campaigns({ rows }: { rows: CampaignRow[] }) {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 max-w-3xl">
                   <h2 className="flex items-center gap-3 text-[16px] font-semibold">
-                    {campaign.name}
+                    <Link href={`/campaigns/${campaign.id}`} className="hover:underline">
+                      {campaign.name}
+                    </Link>
                     <Status tone={campaign.active ? "accent" : "neutral"}>{campaign.active ? "active" : "paused"}</Status>
                   </h2>
                   <p className="mt-1 text-[13px] leading-6 text-ink-muted">{campaign.angle}</p>
+                  <p className="mt-1 text-[12px] text-ink-faint">
+                    {campaign.audience ? `Audience: ${campaign.audience}` : "No audience yet"} ·{" "}
+                    <Link href={`/campaigns/${campaign.id}`} className="font-medium text-accent-strong hover:underline">
+                      People and candidates →
+                    </Link>
+                  </p>
                   <ol className="mt-3 flex flex-wrap gap-1.5 text-[12px]">
                     {campaign.steps.map((step, index) => (
                       <li key={index} className="rounded-[6px] border border-line px-2 py-1 text-ink-muted">

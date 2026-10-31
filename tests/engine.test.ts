@@ -22,6 +22,11 @@ const harness = vi.hoisted(() => ({
   // Gmail threads the owner has outside Threadline, and whether Gmail answers.
   gmailThreads: [] as { email: string; id: string; at: Date }[],
   gmailDown: false,
+  // What the YC directory and Apollo return to the hourly fill.
+  ycFound: { source: "yc", warnings: [], companies: [] } as Record<string, unknown>,
+  ycSearches: 0,
+  apolloPeople: [] as { name: string; title: string }[],
+  apolloLookups: 0,
 }));
 
 vi.mock("@/lib/db/client", () => ({ getDatabase: () => harness.db }));
@@ -58,6 +63,27 @@ vi.mock("@/lib/gmail", () => ({
       },
     }),
   },
+}));
+
+vi.mock("@/lib/sources/yc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sources/yc")>()),
+  searchYcDirectory: async () => {
+    harness.ycSearches += 1;
+    return harness.ycFound;
+  },
+}));
+
+vi.mock("@/lib/sources/apollo", () => ({
+  apolloFindPeople: async () => harness.apolloPeople,
+  apolloRevealEmail: async (input: { name: string; domain?: string }) => {
+    harness.apolloLookups += 1;
+    return `${input.name.split(" ")[0]!.toLowerCase()}@${input.domain}`;
+  },
+}));
+
+vi.mock("@/lib/sources/email-guess", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sources/email-guess")>()),
+  domainAcceptsMail: async () => false,
 }));
 
 vi.mock("@/lib/linkedin", async (importOriginal) => {
@@ -596,6 +622,68 @@ describe("health", () => {
       linkedinInboxCheckedAt: "2026-10-31T01:00:00.000Z",
       lastRefreshAt: "2026-10-31T02:00:00.000Z",
     });
+  });
+});
+
+describe("hourly fill", () => {
+  it("sources a campaign's audience, researches, finds people and looks up the best emails, once", async () => {
+    // Only what this test adds should need work.
+    await db.update(schema.companies).set({ researchedAt: new Date() }).where(sql`researched_at is null`);
+    await db.update(schema.companies).set({ metadata: sql`metadata || '{"peopleSearchedAt": "2026-01-01"}'::jsonb` });
+    await db.insert(schema.campaigns).values({ name: "iOS teams", angle: "x", audience: "ios", steps: [{ channel: "email", waitDays: 0, guidance: "" }] });
+    harness.ycFound = {
+      source: "yc",
+      warnings: [],
+      companies: [{ name: "Sourced Co", domain: "sourced.dev", description: "An iOS app", signals: [], people: [] }],
+    };
+    harness.apolloPeople = [
+      { name: "Cara Cto", title: "CTO" },
+      { name: "Ivan Ios", title: "iOS Engineer" },
+    ];
+    process.env.APOLLO_API_KEY = "test-key";
+    try {
+      const first = await engine.fillPipeline(Date.now() + 60_000);
+      expect(first).toEqual({ sourced: 1, researched: 1, peopleFound: 2, emails: 1, problems: [] });
+      expect(await person("Cara Cto")).toMatchObject({ email: "cara@sourced.dev", emailStatus: "found", stage: "new" });
+      // Hands-on engineers aren't worth a credit up front.
+      expect((await person("Ivan Ios")).email).toBeNull();
+      expect(harness.apolloLookups).toBe(1);
+
+      const again = await engine.fillPipeline(Date.now() + 60_000);
+      expect(again).toEqual({ sourced: 0, researched: 0, peopleFound: 0, emails: 0, problems: [] });
+      expect(harness.ycSearches).toBe(1);
+      expect(harness.apolloLookups).toBe(1);
+      expect((await loadRuntimeState()).lastFill).toMatchObject({ sourced: 0, researched: 0 });
+      // Nobody was enrolled or contacted.
+      expect((await person("Cara Cto")).campaignId).toBeNull();
+    } finally {
+      delete process.env.APOLLO_API_KEY;
+    }
+  });
+
+  it("ranks the CRM with reasons and learns from who replied", async () => {
+    const best = await queries.loadPeople({ view: "best" });
+    const cara = best.rows.find((row) => row.name === "Cara Cto")!;
+    // Rae, a CTO, replied earlier, so deciders already rank a little higher.
+    const lift = best.learning.lifts.decider!;
+    expect(lift.lift).toBeGreaterThan(1);
+    expect(cara.rank).toMatchObject({ stakeholder: "decider", score: Math.round(Math.min(100, 88 * lift.lift)) });
+    expect(cara.rank.reasons).toEqual([
+      "CTO: can decide on CI spend",
+      "Sourced Co fit 88: Your ios.yml",
+      "email found",
+      `Decision makers reply ${lift.lift.toFixed(1)}× average so far (${lift.replied}/${lift.contacted})`,
+    ]);
+    const ivan = best.rows.find((row) => row.name === "Ivan Ios")!;
+    expect(best.rows.indexOf(cara)).toBeLessThan(best.rows.indexOf(ivan));
+    // Held back people aren't "best next".
+    expect(best.rows.some((row) => row.name === "Lée Linked")).toBe(false);
+    expect((await queries.loadPeople({ view: "held" })).rows.some((row) => row.name === "Lée Linked")).toBe(true);
+
+    const { learning } = await queries.loadPeople({ view: "all" });
+    expect(learning.contacted).toBeGreaterThan(0);
+    expect(learning.replied).toBeGreaterThan(0);
+    expect(learning.byRole.map((row) => row.key)).toContain("unknown");
   });
 });
 

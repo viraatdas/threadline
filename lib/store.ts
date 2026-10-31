@@ -146,6 +146,11 @@ interface RuntimeState {
   // touch" check reads it.
   linkedinConversations?: { name: string; when?: string }[];
   linkedinConversationsAt?: string;
+  // The hourly fill (engine fillPipeline): when each campaign's audience was
+  // last searched, and today's Apollo email lookups against the daily cap.
+  sourcedAt?: Record<string, string>;
+  apolloLookups?: { day: string; count: number };
+  lastFill?: { at: string; sourced: number; researched: number; peopleFound: number; emails: number };
 }
 
 export async function loadRuntimeState(): Promise<RuntimeState> {

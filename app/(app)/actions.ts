@@ -192,6 +192,17 @@ export async function revealEmailAction(personId: string) {
   return run(() => revealEmail(uuid.parse(personId)), ["/prospects/[id]"]);
 }
 
+// One Apollo credit per person looked up, so it's capped per click.
+export async function findEmailsAction(personIds: string[]) {
+  return run(async () => {
+    let found = 0;
+    for (const id of uuids.max(25).parse(personIds)) {
+      if (await revealEmail(id)) found += 1;
+    }
+    return { found, checked: personIds.length };
+  }, ["/people", "/campaigns/[id]", "/prospects/[id]"]);
+}
+
 export async function setCompanyStatusAction(companyIds: string[], status: "new" | "target" | "archived") {
   return run(async () => {
     await getDatabase()
@@ -205,7 +216,13 @@ export async function setCompanyStatusAction(companyIds: string[], status: "new"
 
 export async function enrollAction(personIds: string[], campaignId: string) {
   return withHeldBack(
-    await run(() => enroll(uuids.max(25).parse(personIds), uuid.parse(campaignId)), ["/", "/prospects/[id]", "/campaigns"]),
+    await run(() => enroll(uuids.max(25).parse(personIds), uuid.parse(campaignId)), [
+      "/",
+      "/prospects/[id]",
+      "/campaigns",
+      "/campaigns/[id]",
+      "/people",
+    ]),
   );
 }
 
@@ -298,6 +315,17 @@ export async function saveCampaignAction(input: z.input<typeof campaignInput>) {
       .returning({ id: campaigns.id });
     return created!.id;
   }, ["/campaigns", "/prospects"]);
+}
+
+// The YC directory phrases the hourly job sources new companies from.
+export async function saveAudienceAction(campaignId: string, audience: string) {
+  return run(async () => {
+    const value = z.string().trim().max(500).parse(audience);
+    await getDatabase()
+      .update(campaigns)
+      .set({ audience: value || null, updatedAt: new Date() })
+      .where(eq(campaigns.id, uuid.parse(campaignId)));
+  }, ["/campaigns", "/campaigns/[id]"]);
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────

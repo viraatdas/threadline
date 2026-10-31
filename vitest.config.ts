@@ -6,5 +6,6 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname), "server-only": path.resolve(__dirname, "tests/server-only.ts") },
   },
-  test: { environment: "node", include: ["tests/**/*.test.ts"], globals: true },
+  // Migrating a fresh PGlite takes a few seconds, more on a busy machine.
+  test: { environment: "node", include: ["tests/**/*.test.ts"], globals: true, hookTimeout: 60_000 },
 });

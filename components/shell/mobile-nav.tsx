@@ -11,7 +11,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Mobile navigation"
-      className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-line bg-white/95 px-2 pt-2 pb-[max(8px,env(safe-area-inset-bottom))] backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-line bg-white/95 px-2 pt-2 pb-[max(8px,env(safe-area-inset-bottom))] backdrop-blur lg:hidden"
     >
       {navigation.map(({ label, href, icon: Icon }) => {
         const active = isActive(pathname, href);

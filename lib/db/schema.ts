@@ -76,6 +76,9 @@ export const campaigns = pgTable("campaigns", {
   name: text("name").notNull(),
   // The angle: who this is for and why now. Fed to every draft.
   angle: text("angle").notNull(),
+  // Who to source for it: YC directory phrases, comma-separated. The hourly
+  // job adds matching companies to Prospects (it never enrolls anyone).
+  audience: text("audience"),
   steps: jsonb("steps").$type<CampaignStep[]>().notNull(),
   active: boolean("active").default(true).notNull(),
   ...timestamps,

@@ -15,6 +15,13 @@
       "when": 1793417732547,
       "tag": "0001_outbound",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793437928077,
+      "tag": "0002_campaign_audience",
+      "breakpoints": true
     }
   ]
 }

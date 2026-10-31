@@ -1,11 +1,12 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 import { getDatabase } from "@/lib/db/client";
 import { campaigns, companies, messages, people, signals } from "@/lib/db/schema";
-import { DEFAULT_CAMPAIGN, X_CAMPAIGN } from "@/lib/domain";
+import { CHANNEL_LABELS, DEFAULT_CAMPAIGN, readInTouch, X_CAMPAIGN, type Channel } from "@/lib/domain";
 import { LinkedinClient, workerConfig } from "@/lib/linkedin";
+import { learnLifts, rankInputFor, rankPerson, STAKEHOLDER_LABELS, stakeholderOf, type GroupStat } from "@/lib/rank";
 import { listConnections, loadApiKey, loadRuntimeState, loadSettings } from "@/lib/store";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -169,6 +170,125 @@ export async function loadCompany(id: string) {
 }
 
 export type CompanyData = NonNullable<Awaited<ReturnType<typeof loadCompany>>>;
+
+// ── People (the CRM) ─────────────────────────────────────────────────────────
+// Everyone on file, ranked by rankPerson. "best" is who to contact next: not
+// yet in a sequence, not held back as already in touch.
+
+export const PEOPLE_VIEWS = ["best", "active", "replied", "held", "closed", "all"] as const;
+export type PeopleView = (typeof PEOPLE_VIEWS)[number];
+
+export async function loadPeople(filters: { view?: string | undefined; q?: string | undefined; campaignId?: string | undefined; limit?: number }) {
+  const database = getDatabase();
+  const view: PeopleView = (PEOPLE_VIEWS as readonly string[]).includes(filters.view ?? "") ? (filters.view as PeopleView) : "best";
+  const q = filters.q?.trim().replace(/[%_\\]/g, "");
+  const held = sql`(${people.metadata}->'inTouch' is not null and coalesce(${people.metadata}->>'inTouchOverride', '') <> 'true')`;
+  const rows = await database
+    .select({ person: people, company: companies, campaign: { id: campaigns.id, name: campaigns.name, steps: campaigns.steps } })
+    .from(people)
+    .leftJoin(companies, eq(companies.id, people.companyId))
+    .leftJoin(campaigns, eq(campaigns.id, people.campaignId))
+    .where(
+      and(
+        view === "best" ? and(eq(people.stage, "new"), sql`not ${held}`, or(isNull(companies.status), sql`${companies.status} <> 'archived'`)) : undefined,
+        view === "active" ? eq(people.stage, "active") : undefined,
+        view === "replied" ? inArray(people.stage, ["replied", "meeting"]) : undefined,
+        view === "held" ? and(inArray(people.stage, ["new", "active"]), held) : undefined,
+        view === "closed" ? eq(people.stage, "closed") : undefined,
+        filters.campaignId ? eq(people.campaignId, filters.campaignId) : undefined,
+        q ? or(ilike(people.name, `%${q}%`), ilike(people.title, `%${q}%`), ilike(companies.name, `%${q}%`)) : undefined,
+      ),
+    )
+    .orderBy(desc(people.updatedAt))
+    .limit(1000);
+  const learning = await loadLearning();
+  const ranked = rows.map(({ person, company, campaign }) => ({
+    id: person.id,
+    name: person.name,
+    title: person.title,
+    email: person.email,
+    emailStatus: person.emailStatus,
+    linkedinUrl: person.linkedinUrl,
+    stage: person.stage,
+    closedReason: person.closedReason,
+    nextStep: person.nextStep,
+    nextStepAt: person.nextStepAt,
+    lastContactedAt: person.lastContactedAt,
+    repliedAt: person.repliedAt,
+    inTouch: readInTouch(person.metadata),
+    included: person.metadata.inTouchOverride === true,
+    company: company ? { id: company.id, name: company.name, score: company.score, domain: company.domain } : null,
+    campaign: campaign ? { id: campaign.id, name: campaign.name, steps: campaign.steps.length } : null,
+    rank: rankPerson(rankInputFor(person, company), learning.lifts),
+  }));
+  const time = (value: Date | null) => value?.getTime() ?? 0;
+  ranked.sort(
+    view === "active"
+      ? (a, b) => (time(a.nextStepAt) || Infinity) - (time(b.nextStepAt) || Infinity)
+      : view === "replied"
+        ? (a, b) => time(b.repliedAt) - time(a.repliedAt)
+        : view === "closed"
+          ? () => 0
+          : (a, b) => b.rank.score - a.rank.score,
+  );
+  return { view, rows: ranked.slice(0, filters.limit ?? 300), total: ranked.length, learning };
+}
+
+export type PeopleData = Awaited<ReturnType<typeof loadPeople>>;
+export type PersonRow = PeopleData["rows"][number];
+
+// Reply rates among everyone Threadline has written to, by role, by the
+// channel of the first message, and by campaign. The role lifts feed ranking.
+async function loadLearning() {
+  const contacted = await getDatabase()
+    .select({
+      title: people.title,
+      stage: people.stage,
+      repliedAt: people.repliedAt,
+      campaign: campaigns.name,
+      firstChannel: sql<Channel | null>`(select m.channel from messages m where m.person_id = "people"."id" and m.direction = 'out' and m.status = 'sent' order by m.sent_at asc limit 1)`,
+    })
+    .from(people)
+    .leftJoin(campaigns, eq(campaigns.id, people.campaignId))
+    .where(isNotNull(people.lastContactedAt));
+  const group = (keyOf: (row: (typeof contacted)[number]) => string) => {
+    const groups = new Map<string, GroupStat>();
+    for (const row of contacted) {
+      const key = keyOf(row);
+      const stat = groups.get(key) ?? { key, contacted: 0, replied: 0 };
+      stat.contacted += 1;
+      if (row.repliedAt || row.stage === "replied" || row.stage === "meeting") stat.replied += 1;
+      groups.set(key, stat);
+    }
+    return [...groups.values()].sort((a, b) => b.contacted - a.contacted);
+  };
+  const byRole = group((row) => stakeholderOf(row.title));
+  return {
+    contacted: contacted.length,
+    replied: byRole.reduce((sum, stat) => sum + stat.replied, 0),
+    byRole: byRole.map((stat) => ({ ...stat, label: STAKEHOLDER_LABELS[stat.key as keyof typeof STAKEHOLDER_LABELS] ?? stat.key })),
+    byChannel: group((row) => row.firstChannel ?? "none").map((stat) => ({
+      ...stat,
+      label: stat.key === "none" ? "Unknown" : CHANNEL_LABELS[stat.key as Channel],
+    })),
+    byCampaign: group((row) => row.campaign ?? "No campaign").map((stat) => ({ ...stat, label: stat.key })),
+    lifts: learnLifts(byRole),
+  };
+}
+
+export async function loadCampaign(id: string) {
+  await ensureDefaultCampaign();
+  const [campaign] = await getDatabase().select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
+  if (!campaign) return null;
+  const [members, suggestions, runtime] = await Promise.all([
+    loadPeople({ view: "all", campaignId: id }),
+    loadPeople({ view: "best", limit: 15 }),
+    loadRuntimeState(),
+  ]);
+  return { campaign, members: members.rows, suggestions: suggestions.rows, sourcedAt: runtime.sourcedAt?.[id] ?? null };
+}
+
+export type CampaignData = NonNullable<Awaited<ReturnType<typeof loadCampaign>>>;
 
 // A fresh install gets one sensible campaign so Enroll works on day one.
 async function ensureDefaultCampaign() {

@@ -64,9 +64,10 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | `lib/ai.ts` | `researchCompany` (Haiku: score 0–100, fit, hook, titles) and `draftStep` (Sonnet). |
 | `lib/gmail.ts` | OAuth (`gmail.send` + `gmail.readonly`), token refresh, MIME building, threaded sends, reply/bounce lookup. Plain fetch, no googleapis. |
 | `lib/linkedin.ts` | Client for our browser worker (`BROWSER_WORKER_URL`/`_TOKEN`): one narrowly worded agent run per LinkedIn action (invite, message, people search, read-only inbox check) with a step cap and a JSON output schema. Runs are async: queue → poll. |
-| `lib/queries.ts` | Read-side loaders for each page. |
+| `lib/queries.ts` | Read-side loaders for each page; `loadPeople` ranks everyone and computes reply rates by role/channel/campaign. |
+| `lib/rank.ts` | Client-safe person ranking, stakeholder roles and reply-rate lifts. |
 | `lib/store.ts` | Settings, runtime state, sealed connections, API keys (DB first, env fallback). |
-| `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), Campaigns, Settings; `actions.ts` holds every mutation. |
+| `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), People (the CRM, ranked), Campaigns (+ `[id]`: members, best candidates, audience), Settings; `actions.ts` holds every mutation. |
 | `app/api/` | Auth, `integrations/gmail/{connect,callback}`, `cron` (daily refresh), `import` (CLI push), `linkedin/login/screen` (frames of the worker's sign-in view, owner only). |
 | `browser/` | The self-hosted LinkedIn browser: open-source browser-use + Chromium under Xvfb on Fly (`threadline-browser`). Starlette API (`/runs`, `/status`, `/login*` sign-in view, `DELETE /session`), one run at a time, browser profile on a volume. Chromium exits only through Tailscale (SOCKS5 → the owner's exit node). Deploy with `fly deploy` from `browser/`. |
 | `components/` | One client component per page + `ui.tsx` primitives + `shell/`. |
@@ -107,6 +108,18 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
    route online, no LinkedIn action queued >3h, inbox read within 2 days).
    What it finds, plus any refresh errors, goes to `runtime.health` and shows
    as "Needs attention" on Today, as does a refresh older than 3h.
+8. **Hourly fill** (cron only, `fillPipeline`, bounded to ~230s): source each
+   active campaign's `audience` from the YC directory daily, research up to 8
+   unresearched companies, find people (YC + Apollo search, no LinkedIn) for
+   up to 3 companies scoring 60+, and look up Apollo emails for the best
+   deciders/champions (10/day, `runtime.apolloLookups`). Never enrolls or
+   sends. Counts land in `runtime.lastFill`, shown on People.
+
+**Ranking** (`lib/rank.ts`): person score = company fit × role weight
+(decider 1, champion .9, hands-on .65, other .25; a research target title
+counts .95) × reach (found 1, guessed .8, LinkedIn only .75, none .3) × the
+role's learned reply lift (smoothed toward the average, 0.5–2). Each factor is
+a reason shown on People and campaign pages.
 
 Stages: `new → active → replied → meeting`, or `closed` (`closedReason`:
 `no_reply`, `owner`, …). Message statuses: `draft | sending | sent | failed |

@@ -33,7 +33,7 @@ Find → Research → Enroll → Approve → Reply.
 1. Evidence first: every company shows why it surfaced; every draft opens with
    something specific and true.
 2. Human authority: AI drafts, the owner sends. Nothing leaves without a click.
-3. Small and legible: five pages, seven tables, one daily cron.
+3. Small and legible: six pages, seven tables, one hourly job.
 4. Respect the recipient: low daily limits, stop on reply, no harvested GitHub
    emails, unverified addresses flagged.
 
