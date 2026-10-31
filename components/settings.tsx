@@ -101,8 +101,9 @@ function Connections({ data }: { data: SettingsData }) {
           </p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13px] leading-5 text-ink-muted">
             <li>
-              Once: on your laptop, Tailscale menu → Exit Node → Run as exit node. The worker’s browser only goes out
-              through it, so LinkedIn sees your home connection; while the laptop sleeps, LinkedIn actions wait.
+              Once: make an always-on computer at home a Tailscale exit node (the worker’s TS_EXIT_NODE). The worker’s
+              browser only goes out through it, so LinkedIn sees your home connection; while it’s offline, LinkedIn
+              actions wait.
             </li>
             <li>
               Sign in to LinkedIn in your browser, then on linkedin.com open the Cookie-Editor extension → Export → JSON and

@@ -225,3 +225,6 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
 - **Simpler sign-in:** Settings takes a pasted cookie export (Cookie-Editor JSON, the format the owner used); the worker normalizes `expirationDate` and `no_restriction`. `pnpm linkedin-login` still works. Also fixed the worker's domain check, which accepted `evillinkedin.com`.
 - **Trade-off:** LinkedIn only works while the laptop is awake (actions wait otherwise); an always-on home device (Apple TV, Mac mini, Pi, router) can replace it by changing `TS_EXIT_NODE`. Browser fingerprint is still Linux Chromium, so the risk is lower, not zero.
 
+## 2026-10-31: LinkedIn exit node moves from the laptop to the Jetson
+- **Why:** the laptop slept and stopped answering the worker, so LinkedIn paused (as designed). The owner moved the exit node to `jetson-agx-orin`, which stays on, and dropped the laptop.
+- **How:** Fly secret `TS_EXIT_NODE=100.123.18.102`. `start.sh` now clears any exit node saved in the volume's Tailscale state before setting `TS_EXIT_NODE`, so a previous node is never used. The home check also got stricter: Tailscale must report the exit node online (`ExitNodeStatus.Online`), and the proxied IP must differ from both Fly's direct IPv4 and IPv6 (it had compared against one family only, which a proxy leaking out of Fly over the other family would have passed).

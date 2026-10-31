@@ -176,16 +176,28 @@ def test_a_run_waiting_a_day_for_home_fails_without_running(monkeypatch):
 
 
 def test_home_route_refuses_when_traffic_exits_from_the_server(monkeypatch):
-    async def same_ip(proxy=""):
-        return "203.0.113.7"
+    async def up():
+        return True
 
-    async def via_home(proxy=""):
-        return "198.51.100.2" if proxy else "203.0.113.7"
+    async def down():
+        return False
+
+    def ips(proxied, v4="203.0.113.7", v6="2001:db8::7"):
+        async def public_ip(*flags):
+            return proxied if "--proxy" in flags else v6 if "-6" in flags else v4
+
+        return public_ip
 
     monkeypatch.setattr(worker, "PROXY", "socks5://127.0.0.1:1055")
-    monkeypatch.setattr(worker, "_public_ip", same_ip)
+    monkeypatch.setattr(worker, "_exit_node_online", up)
+    # The proxy fell back to Fly's own IPv4 while the direct check used IPv6.
+    monkeypatch.setattr(worker, "_public_ip", ips("203.0.113.7"))
     assert asyncio.run(worker.home_route())[0] is False
-    monkeypatch.setattr(worker, "_public_ip", via_home)
+    monkeypatch.setattr(worker, "_public_ip", ips(None))
+    assert asyncio.run(worker.home_route())[0] is False
+    monkeypatch.setattr(worker, "_public_ip", ips("198.51.100.2"))
     assert asyncio.run(worker.home_route())[0] is True
+    monkeypatch.setattr(worker, "_exit_node_online", down)
+    assert asyncio.run(worker.home_route())[0] is False
     monkeypatch.setattr(worker, "PROXY", "")
     assert asyncio.run(worker.home_route())[0] is False

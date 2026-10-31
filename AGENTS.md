@@ -169,8 +169,9 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_WORKER_URL` + `BRO
   `pnpm linkedin-login`).
 - LinkedIn revoked the owner's session the first time it saw Fly's datacenter
   IP. The worker's browser therefore only goes out through Tailscale to the
-  owner's exit node (their laptop), and before every run and session import
-  it checks its public IP through the proxy differs from Fly's own; otherwise
+  owner's exit node (`TS_EXIT_NODE`, an always-on home machine), and before
+  every run and session import it checks Tailscale reports that node online
+  and its public IP through the proxy differs from Fly's own; otherwise
   runs stay queued (failed after 24h). Never give the browser a direct route.
 
 ## Conventions

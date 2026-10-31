@@ -80,9 +80,10 @@ vercel deploy --prebuilt --prod --archive=tgz
 `browser/` is a small Python service (browser-use + Chromium under Xvfb) on
 Fly, app `threadline-browser`, with a 1 GB volume for the session. Its browser
 only reaches the internet through Tailscale, via an exit node on your home
-network (your laptop: Tailscale menu → Exit Node → Run as exit node, then
-approve it in the admin console). While the exit node is offline, LinkedIn
-actions wait in the queue.
+network that stays on (currently `jetson-agx-orin`). On a Linux box: turn on IP
+forwarding, run `sudo tailscale set --advertise-exit-node`, then in the admin
+console tick "Use as exit node" under Edit route settings and disable its key
+expiry. While the exit node is offline, LinkedIn actions wait in the queue.
 
 Secrets: `BROWSER_WORKER_TOKEN` (the same value as the app's),
 `OPENROUTER_API_KEY`, `TS_AUTHKEY` (a one-off, pre-approved Tailscale auth key;

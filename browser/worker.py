@@ -231,19 +231,27 @@ async def verify_login() -> tuple[bool, str]:
     return False, "LinkedIn didn't open the feed."
 
 
-async def _public_ip(proxy: str = "") -> str | None:
-    args = ["curl", "-fsS", "--max-time", "10"]
-    if proxy:
-        args += ["--proxy", proxy.replace("socks5://", "socks5h://")]
+async def _output(*args: str) -> str | None:
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *args, "https://www.cloudflare.com/cdn-cgi/trace", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-        )
+        proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await proc.communicate()
     except OSError:
         return None
-    match = re.search(r"^ip=([0-9a-fA-F.:]+)$", out.decode(errors="replace"), re.M)
-    return match.group(1) if proc.returncode == 0 and match else None
+    return out.decode(errors="replace") if proc.returncode == 0 else None
+
+
+async def _public_ip(*curl_flags: str) -> str | None:
+    out = await _output("curl", "-fsS", "--max-time", "10", *curl_flags, "https://www.cloudflare.com/cdn-cgi/trace")
+    match = re.search(r"^ip=([0-9a-fA-F.:]+)$", out or "", re.M)
+    return match.group(1) if match else None
+
+
+async def _exit_node_online() -> bool:
+    try:
+        status = json.loads(await _output("tailscale", "status", "--json") or "{}")
+    except json.JSONDecodeError:
+        return False
+    return bool((status.get("ExitNodeStatus") or {}).get("Online"))
 
 
 _home_cache: tuple[float, bool, str] = (0.0, False, "")
@@ -257,10 +265,17 @@ async def home_route(max_age: float = 0) -> tuple[bool, str]:
     if not PROXY:
         result = (False, "No home connection is set up (Tailscale exit node).")
     else:
-        home, direct = await asyncio.gather(_public_ip(PROXY), _public_ip())
-        if not home:
+        # Tailscale must report the exit node up, and the proxy's public IP must
+        # be neither of Fly's own (it egresses over both IPv4 and IPv6).
+        online, home, direct4, direct6 = await asyncio.gather(
+            _exit_node_online(),
+            _public_ip("--proxy", PROXY.replace("socks5://", "socks5h://")),
+            _public_ip("-4"),
+            _public_ip("-6"),
+        )
+        if not online or not home:
             result = (False, "Your home connection (the Tailscale exit node) is offline. LinkedIn actions wait until it's back.")
-        elif home == direct:
+        elif home in (direct4, direct6):
             result = (False, "Traffic isn't going through your home connection, so LinkedIn actions are paused.")
         else:
             result = (True, "LinkedIn traffic goes through your home connection.")
