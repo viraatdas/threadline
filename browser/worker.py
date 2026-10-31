@@ -380,7 +380,8 @@ async def get_run(request: Request) -> JSONResponse:
 # LinkedIn revokes sessions copied in from another browser, so the owner signs
 # in here instead: Settings shows screenshots of this browser and relays their
 # clicks and keys. Nothing typed is logged or kept. While open, the view holds
-# LOCK so no run shares the profile, and it closes itself after 10 idle minutes.
+# LOCK so no run shares the profile; it closes itself after 10 minutes without
+# a click or key (screen polls don't count, so a forgotten tab can't hold it).
 
 LOGIN_IDLE_S = 600
 # Only the owner drives the view (no agent), so it may also reach Google for
@@ -488,7 +489,6 @@ class LoginView:
 
     async def screen(self) -> tuple[bytes, str]:
         assert self.session
-        self.touch()
         await self._focus()
         image = await self.session.take_screenshot(format="jpeg", quality=60)
         host = urlparse(await self.session.get_current_page_url()).hostname or ""
