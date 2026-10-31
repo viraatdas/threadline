@@ -21,7 +21,7 @@ import {
   type SendOutcome,
 } from "@/lib/engine";
 import { ingest, upsertPerson, type IngestSummary } from "@/lib/ingest";
-import { linkedinCredentialsSchema } from "@/lib/linkedin";
+import { LinkedinClient, linkedinCredentialsSchema } from "@/lib/linkedin";
 import { parseManualImport } from "@/lib/manual-import";
 import { findMacCiTeams } from "@/lib/sources/github";
 import { searchHackerNews } from "@/lib/sources/hn";
@@ -281,11 +281,16 @@ export async function saveSettingsAction(input: z.input<typeof settingsSchema>) 
   return run(() => saveSettings(settingsSchema.parse(input)), ["/settings"]);
 }
 
-export async function saveLinkedinAction(input: z.input<typeof linkedinCredentialsSchema> & { label?: string }) {
+export async function saveLinkedinAction(input: z.input<typeof linkedinCredentialsSchema>) {
   return run(async () => {
     const credentials = linkedinCredentialsSchema.parse(input);
-    const label = z.string().trim().max(120).optional().parse(input.label) || "LinkedIn via Linked API";
-    await saveConnection("linkedin", label, credentials, { provider: "Linked API" });
+    // Checked before saving: the key works and the synced profile really holds
+    // LinkedIn cookies. Costs nothing; no browser is started.
+    const profile = await new LinkedinClient(credentials).profile();
+    if (!profile.hasLinkedin) {
+      throw new Error("That Browser Use profile has no linkedin.com cookies. Run the profile sync again and pick LinkedIn.");
+    }
+    await saveConnection("linkedin", `Browser Use · ${profile.name ?? "LinkedIn profile"}`, credentials, { provider: "Browser Use" });
   }, ["/settings"]);
 }
 

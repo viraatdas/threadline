@@ -17,6 +17,8 @@ const harness = vi.hoisted(() => ({
   replyFrom: "extra@acme.dev",
   linkedinStarts: [] as Record<string, unknown>[],
   linkedinOutcome: { status: "completed", data: null } as Record<string, unknown>,
+  inboxRuns: 0,
+  inbox: { conversations: [] } as unknown,
 }));
 
 vi.mock("@/lib/db/client", () => ({ getDatabase: () => harness.db }));
@@ -57,7 +59,11 @@ vi.mock("@/lib/linkedin", async (importOriginal) => {
       return "wf-2";
     },
     waitFor: async (workflowId: string) => ({ workflowId, ...harness.linkedinOutcome }),
-    inboxSince: async () => [],
+    startInboxCheck: async () => {
+      harness.inboxRuns += 1;
+      return "inbox-run";
+    },
+    workflow: async (workflowId: string) => ({ workflowId, status: "completed", data: harness.inbox }),
   };
   return { ...actual, LinkedinClient: { load: async () => client } };
 });
@@ -65,7 +71,7 @@ vi.mock("@/lib/linkedin", async (importOriginal) => {
 const { ingest } = await import("@/lib/ingest");
 const engine = await import("@/lib/engine");
 const queries = await import("@/lib/queries");
-const { saveSettings, loadSettings } = await import("@/lib/store");
+const { saveSettings, loadSettings, saveRuntimeState } = await import("@/lib/store");
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 let db: Db;
@@ -361,5 +367,45 @@ describe("X", () => {
     const [after] = await draftsFor(pat.id);
     expect(after).toMatchObject({ status: "sent", body: "edited dm" });
     expect(await person("Pat Ships")).toMatchObject({ nextStep: 1, stage: "active" });
+  });
+});
+
+describe("LinkedIn replies", () => {
+  it("starts an inbox run on one refresh, collects it on the next, and stops the sequence", async () => {
+    await ingest({
+      source: "manual",
+      warnings: [],
+      companies: [
+        {
+          name: "Replyco",
+          domain: "replyco.dev",
+          signals: [],
+          people: [{ name: "Rae Plier", title: "CTO", linkedinUrl: "https://www.linkedin.com/in/rae" }],
+        },
+      ],
+    });
+    const rae = await person("Rae Plier");
+    const [linkedinOnly] = await db
+      .insert(schema.campaigns)
+      .values({ name: "LinkedIn only", angle: "x", steps: [{ channel: "linkedin_invite", waitDays: 0, guidance: "" }, { channel: "linkedin_message", waitDays: 2, guidance: "" }] })
+      .returning();
+    await engine.enroll([rae.id], linkedinOnly!.id);
+    const [invite] = await draftsFor(rae.id);
+    harness.linkedinOutcome = { status: "completed", data: null };
+    expect(await engine.sendMessage(invite!.id)).toEqual({ status: "sent" });
+
+    await saveRuntimeState({ linkedinInboxRun: null, linkedinInboxCheckedAt: "2020-01-01T00:00:00.000Z" });
+    const runsBefore = harness.inboxRuns;
+    await engine.refresh();
+    expect(harness.inboxRuns).toBe(runsBefore + 1);
+    expect((await person("Rae Plier")).stage).toBe("active");
+
+    harness.inbox = { conversations: [{ name: "Rae Plier", lastMessageFromThem: true, preview: "Sure, send details", when: "2:14 PM" }] };
+    const second = await engine.refresh();
+    expect(second.replies).toBeGreaterThanOrEqual(1);
+    expect((await person("Rae Plier")).stage).toBe("replied");
+    // The run was collected; the next one waits for the interval.
+    await engine.refresh();
+    expect(harness.inboxRuns).toBe(runsBefore + 1);
   });
 });

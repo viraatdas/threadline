@@ -1,6 +1,6 @@
 import { buildMime } from "@/lib/gmail";
 import { findResultSchema } from "@/lib/ingest";
-import { normalizeLinkedinUrl, peopleFromSearch } from "@/lib/linkedin";
+import { LinkedinClient, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
 import { parseManualImport } from "@/lib/manual-import";
 
 const decode = (raw: string) => Buffer.from(raw, "base64url").toString("utf8");
@@ -73,15 +73,97 @@ describe("linkedin helpers", () => {
     expect(normalizeLinkedinUrl("not a url")).toBe("not a url");
   });
 
-  it("keeps only plausible buyers from a company search", () => {
-    const people = peopleFromSearch([
-      { name: "A", publicUrl: "https://www.linkedin.com/in/a", headline: "Co-founder & CTO at Acme" },
-      { name: "B", publicUrl: "https://www.linkedin.com/in/b", headline: "Account Executive" },
-      { name: "C", publicUrl: "https://www.linkedin.com/in/c", headline: "Senior iOS Engineer", location: "SF" },
-      { bogus: true },
-    ]);
+  it("keeps only plausible buyers with real profile URLs from a company search", () => {
+    const people = peopleFromSearch({
+      people: [
+        { name: "A", profileUrl: "https://www.linkedin.com/in/a", headline: "Co-founder & CTO at Acme" },
+        { name: "B", profileUrl: "https://www.linkedin.com/in/b", headline: "Account Executive" },
+        { name: "C", profileUrl: "https://linkedin.com/in/C/", headline: "Senior iOS Engineer", location: "SF" },
+        { name: "D", profileUrl: "https://www.linkedin.com/company/acme", headline: "Head of Platform" },
+        { bogus: true },
+      ],
+    });
     expect(people.map((p) => p.name)).toEqual(["A", "C"]);
     expect(people[1]).toMatchObject({ location: "SF", linkedinUrl: "https://www.linkedin.com/in/c" });
+    expect(peopleFromSearch(null)).toEqual([]);
+  });
+
+  it("reads replies from an inbox-check run", () => {
+    expect(
+      repliesFromInbox({
+        conversations: [
+          { name: "Ada Founder", lastMessageFromThem: true, preview: "Sounds good, let's talk", when: "2:14 PM" },
+          { name: "Bo", lastMessageFromThem: false, preview: "You: hey" },
+          { name: 7 },
+        ],
+      }),
+    ).toEqual([{ name: "Ada Founder", preview: "Sounds good, let's talk", when: "2:14 PM" }]);
+  });
+
+  it("parses LinkedIn's conversation-list times", () => {
+    const now = new Date(2026, 9, 31, 15, 0); // Sat Oct 31 2026
+    const day = (y: number, m: number, d: number) => new Date(y, m, d).getTime();
+    expect(parseLinkedinTime("2:14 PM", now)?.getTime()).toBe(day(2026, 9, 31));
+    expect(parseLinkedinTime("Yesterday", now)?.getTime()).toBe(day(2026, 9, 30));
+    expect(parseLinkedinTime("Mon", now)?.getTime()).toBe(day(2026, 9, 26));
+    expect(parseLinkedinTime("Oct 29", now)?.getTime()).toBe(day(2026, 9, 29));
+    expect(parseLinkedinTime("Dec 30", new Date(2027, 0, 5))?.getTime()).toBe(day(2026, 11, 30));
+    expect(parseLinkedinTime("Oct 29, 2025", now)?.getTime()).toBe(day(2025, 9, 29));
+    expect(parseLinkedinTime("someday", now)).toBeNull();
+    expect(parseLinkedinTime(undefined, now)).toBeNull();
+  });
+});
+
+describe("LinkedinClient (Browser Use)", () => {
+  const client = new LinkedinClient({ apiKey: "bu_test_key", profileId: "11111111-2222-4333-8444-555555555555" });
+  const calls: { url: string; init: RequestInit }[] = [];
+  const respond = (body: unknown, status = 200) => {
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    });
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    calls.length = 0;
+  });
+
+  it("starts one narrow run with the synced profile, a cost cap and an output schema", async () => {
+    respond({ id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", status: "queued" });
+    const id = await client.startConnectionRequest("https://www.linkedin.com/in/ada", 'Hi "Ada"\nloved the post');
+    expect(id).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    const [call] = calls;
+    expect(call!.url).toBe("https://api.browser-use.com/api/v4/runs");
+    expect((call!.init.headers as Record<string, string>)["X-Browser-Use-API-Key"]).toBe("bu_test_key");
+    const body = JSON.parse(String(call!.init.body));
+    expect(body.browserSettings).toEqual({ profileId: "11111111-2222-4333-8444-555555555555", proxyCountryCode: "us" });
+    expect(body.maxCostUsd).toBeGreaterThan(0);
+    expect(body.outputSchema.required).toEqual(["outcome", "detail"]);
+    // The note travels as a JSON string so quotes and newlines can't break the task.
+    expect(body.task).toContain(JSON.stringify('Hi "Ada"\nloved the post'));
+  });
+
+  it("maps run outcomes to states the engine understands", async () => {
+    const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    respond({ status: "running" });
+    expect(await client.workflow(id)).toEqual({ status: "running", workflowId: id });
+    respond({ status: "completed", output: { outcome: "sent", detail: "Invitation sent." } });
+    expect(await client.workflow(id)).toMatchObject({ status: "completed" });
+    respond({ status: "completed", output: JSON.stringify({ outcome: "sent_without_note", detail: "" }) });
+    expect(await client.workflow(id)).toMatchObject({ status: "completed", detail: expect.stringContaining("without a note") });
+    respond({ status: "completed", output: { outcome: "already_connected", detail: "1st" } });
+    expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "alreadyConnected" });
+    respond({ status: "completed", output: { outcome: "logged_out", detail: "sign in page" } });
+    expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "loggedOut" });
+    respond({ status: "failed", error: "Could not produce output matching outputSchema." });
+    expect(await client.workflow(id)).toMatchObject({ status: "failed", code: "runFailed" });
+  });
+
+  it("confirms the profile holds LinkedIn cookies, and explains HTTP failures without bodies", async () => {
+    respond({ id: "x", name: "Mac Chrome", cookieDomains: [".linkedin.com", "www.google.com"] });
+    expect(await client.profile()).toEqual({ name: "Mac Chrome", hasLinkedin: true });
+    respond({ detail: "secret task text echoed" }, 402);
+    await expect(client.profile()).rejects.toThrow("out of credits");
   });
 });
 

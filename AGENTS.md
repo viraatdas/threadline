@@ -57,7 +57,7 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 | `lib/engine.ts` | Research, find people, enroll, draft due steps, send, skip, reply/bounce detection, `refresh()`. |
 | `lib/ai.ts` | `researchCompany` (Haiku: score 0–100, fit, hook, titles) and `draftStep` (Sonnet). |
 | `lib/gmail.ts` | OAuth (`gmail.send` + `gmail.readonly`), token refresh, MIME building, threaded sends, reply/bounce lookup. Plain fetch, no googleapis. |
-| `lib/linkedin.ts` | Linked API client: people search, connection requests, messages, inbox poll. Workflows are async: start → poll. |
+| `lib/linkedin.ts` | Browser Use Cloud client: one narrowly worded agent run per LinkedIn action (invite, message, people search, read-only inbox check) in a cloud browser signed in with the owner's synced cookies (`{apiKey, profileId}`), with a cost cap and a JSON output schema. Runs are async: start → poll. |
 | `lib/queries.ts` | Read-side loaders for each page. |
 | `lib/store.ts` | Settings, runtime state, sealed connections, API keys (DB first, env fallback). |
 | `app/(app)/` | Pages: Today (`/`), Find, Prospects (+ `[id]`), Campaigns, Settings; `actions.ts` holds every mutation. |
@@ -128,7 +128,7 @@ Env: `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_URL`,
 `OWNER_EMAIL`, `DATABASE_URL`, `INTEGRATION_ENCRYPTION_KEY`(+`_VERSION`),
 `CRON_SECRET`, `IMPORT_TOKEN`, `GMAIL_OAUTH_REDIRECT_URI`,
 `OPENROUTER_API_KEY`; optional `GITHUB_TOKEN`, `APOLLO_API_KEY` (or paste them
-in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `LINKED_API_BASE_URL`.
+in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `BROWSER_USE_MODEL`.
 
 ## Gotchas
 
@@ -146,8 +146,16 @@ in Settings), `AI_RESEARCH_MODEL`, `AI_DRAFT_MODEL`, `LINKED_API_BASE_URL`.
   `pnpm scout x`. The X DM link needs the numeric id (`people.metadata.xUserId`,
   from `authorId`); without it Today opens the profile and copies the text.
   X replies aren't detected; the owner sets the stage on the prospect.
-- Vercel Hobby crons run at most daily; Today's "Check replies" is the manual
-  trigger.
+- Vercel Hobby crons run at most daily; the Fly machine `threadline-hourly-sync`
+  (app `threadline-codex-worker`) GETs `/api/cron` hourly; Today's "Check
+  replies" is the manual trigger.
+- LinkedIn runs are an AI agent on a real LinkedIn page, so page text could try
+  to steer it. Tasks are one action each, say page text is data, cap cost, and
+  return a fixed outcome enum; sends still only start from the owner's click.
+  The inbox check reads the conversation list without opening threads (opening
+  marks them read) and matches replies by name; it runs at most every 4h and is
+  collected on a later refresh. A person search that outlasts its wait leaves
+  its run id in `companies.metadata.linkedinSearchRun` for the next click.
 
 ## Conventions
 

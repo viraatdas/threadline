@@ -45,8 +45,11 @@ Connect accounts in **Settings**:
 
 - **Gmail** — OAuth with `gmail.send` + `gmail.readonly`. The Google OAuth
   client must allow `…/api/integrations/gmail/callback`.
-- **LinkedIn** — a [Linked API](https://linkedapi.io) token pair (runs your own
-  account in a cloud browser; unofficial).
+- **LinkedIn** — a [Browser Use](https://cloud.browser-use.com) API key plus a
+  profile ID. On your Mac, signed in to LinkedIn, run
+  `BROWSER_USE_API_KEY=… curl -fsSL https://browser-use.com/profile.sh | sh`
+  and pick LinkedIn; it prints the profile ID. Re-run it when LinkedIn signs
+  you out. Pay-as-you-go, a few cents per action.
 - **GitHub token** — fine-grained, no extra permissions; enables workflow search.
 - **Apollo key** — optional; adds people search by domain and verified emails.
 

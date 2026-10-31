@@ -77,7 +77,7 @@ export function Today({ data }: { data: TodayData }) {
       </Section>
 
       {pending.length ? (
-        <Section title={`Queued on LinkedIn (${pending.length})`} description="LinkedIn actions run one at a time inside working hours. Check replies to confirm them.">
+        <Section title={`Queued on LinkedIn (${pending.length})`} description="LinkedIn actions run in a cloud browser and take a minute or two. They're confirmed on the next check (hourly, or Check replies).">
           <ul className="divide-y divide-line border-y border-line text-[13px]">
             {pending.map((row) => (
               <li key={row.message.id} className="flex items-center justify-between gap-3 py-3">

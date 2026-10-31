@@ -39,7 +39,7 @@ function ConnectionRow({ name, state, children }: { name: string; state: ReactNo
 function Connections({ data }: { data: SettingsData }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [linkedin, setLinkedin] = useState({ linkedApiToken: "", identificationToken: "" });
+  const [linkedin, setLinkedin] = useState({ apiKey: "", profileId: "" });
   const [keys, setKeys] = useState({ github: "", apollo: "" });
 
   const act = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
@@ -84,39 +84,60 @@ function Connections({ data }: { data: SettingsData }) {
 
         <ConnectionRow
           name="LinkedIn"
-          state={data.linkedin ? <Status tone="accent">{data.linkedin.label}</Status> : <Status>not connected</Status>}
+          state={
+            data.linkedin ? (
+              <Status tone={data.linkedin.lastError ? "warning" : "accent"}>{data.linkedin.label}</Status>
+            ) : (
+              <Status>not connected</Status>
+            )
+          }
         >
           <p className="text-[13px] leading-5 text-ink-muted">
-            Through <a className="underline" href="https://linkedapi.io" target="_blank" rel="noreferrer">Linked API</a>, which
-            runs your own LinkedIn account in a cloud browser within LinkedIn-safe limits. Used for people search,
-            connection requests and messages — each one only after you approve it. It’s unofficial; LinkedIn may restrict
-            accounts that automate.
+            Through{" "}
+            <a className="underline" href="https://cloud.browser-use.com" target="_blank" rel="noreferrer">Browser Use</a>: an
+            AI agent drives a cloud browser signed in with your own LinkedIn cookies. Used for people search, connection
+            requests, messages (each only after you click Send) and reading your inbox for replies. Pay-as-you-go, a few
+            cents per action. LinkedIn may restrict accounts that automate, so keep the daily limit low.
           </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13px] leading-5 text-ink-muted">
+            <li>
+              Create an API key at{" "}
+              <a className="underline" href="https://cloud.browser-use.com" target="_blank" rel="noreferrer">cloud.browser-use.com</a>.
+            </li>
+            <li>
+              On your Mac, signed in to LinkedIn in your browser, run the sync and pick LinkedIn. It prints a profile ID:
+              <pre className="mt-1 overflow-x-auto rounded-[8px] bg-surface-subtle px-3 py-2 text-[12px] leading-5">
+                {`export BROWSER_USE_API_KEY=bu_…
+curl -fsSL https://browser-use.com/profile.sh | sh`}
+              </pre>
+            </li>
+            <li>Paste the key and profile ID here. Re-run the sync whenever LinkedIn signs you out.</li>
+          </ol>
+          {data.linkedin?.lastError ? <p className="mt-2 text-[13px] text-danger">Last error: {data.linkedin.lastError}</p> : null}
           <form
             className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
             onSubmit={(event) => {
               event.preventDefault();
-              act(() => saveLinkedinAction(linkedin), "LinkedIn saved");
-              setLinkedin({ linkedApiToken: "", identificationToken: "" });
+              act(() => saveLinkedinAction(linkedin), "LinkedIn connected");
+              setLinkedin({ apiKey: "", profileId: "" });
             }}
           >
             <Input
               type="password"
               autoComplete="off"
-              placeholder="linked-api-token"
-              value={linkedin.linkedApiToken}
-              onChange={(event) => setLinkedin({ ...linkedin, linkedApiToken: event.target.value })}
-              aria-label="Linked API token"
+              placeholder="Browser Use API key"
+              value={linkedin.apiKey}
+              onChange={(event) => setLinkedin({ ...linkedin, apiKey: event.target.value })}
+              aria-label="Browser Use API key"
             />
             <Input
-              type="password"
               autoComplete="off"
-              placeholder="identification-token"
-              value={linkedin.identificationToken}
-              onChange={(event) => setLinkedin({ ...linkedin, identificationToken: event.target.value })}
-              aria-label="Identification token"
+              placeholder="Profile ID"
+              value={linkedin.profileId}
+              onChange={(event) => setLinkedin({ ...linkedin, profileId: event.target.value })}
+              aria-label="Browser Use profile ID"
             />
-            <Button type="submit" size="sm" variant="primary" className="h-9" disabled={pending || !linkedin.linkedApiToken || !linkedin.identificationToken}>
+            <Button type="submit" size="sm" variant="primary" className="h-9" disabled={pending || !linkedin.apiKey || !linkedin.profileId}>
               Save
             </Button>
           </form>

@@ -201,3 +201,11 @@ Shared, agent-authored log of cross-cutting decisions the fleet must honor. The 
   - Remove unused PROJECT_MATCH_MODEL env var from Vercel — Leftover from Threadline's project matching; nothing reads it now.
 - **By:** worker · 2026-10-31T04:13:42.631Z
 
+
+## 2026-10-31: LinkedIn through Browser Use instead of Linked API
+- **Why:** The owner chose Browser Use (github.com/browser-use/browser-use) over Linked API's $49/seat/mo.
+- **How:** Browser Use Cloud v4 runs (`POST /api/v4/runs`, `X-Browser-Use-API-Key`), each one narrowly worded task with `outputSchema`, `maxCostUsd` and `browserSettings.profileId` + a fixed `proxyCountryCode: "us"`. The profile holds the owner's LinkedIn cookies, synced once from their Mac with Browser Use's `profile.sh`. Saving in Settings checks `GET /profiles/{id}` has linkedin.com cookies (no browser started).
+- **Why cloud, not the self-hosted library:** the app is serverless and sends must work while the owner's Mac sleeps; Browser Use Cloud adds residential proxies and profile sync. Self-hosting the open-source agent on the Mac (`Browser.from_system_chrome()`) remains an option if per-action cost matters.
+- **Behavior:** invite/message outcomes are an enum (sent, sent_without_note, already_connected, already_pending, not_connected, not_found, logged_out, blocked, failed); "already…"/"not_connected" pass the step over; logged_out and 401/402 mark the connection's last error. Sends wait up to 75s inline, else confirm on the next refresh. People search waits 100s, else parks its run id on the company. The inbox check reads the list without opening threads, every ≥4h while someone reached on LinkedIn is active, started on one refresh and collected on the next, matching by name (stops anyway when the time can't be read).
+- **Risk accepted:** an AI agent reads stranger-written LinkedIn text; tasks treat it as data and allow one action, but it can't be made injection-proof.
+- **Gmail:** sending account is viraat@exla.ai (owner's choice).

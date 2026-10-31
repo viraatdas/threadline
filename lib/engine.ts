@@ -17,7 +17,7 @@ import {
 import { LINKEDIN_CHANNELS, type Channel } from "@/lib/domain";
 import { GmailClient } from "@/lib/gmail";
 import { ingest, upsertPerson } from "@/lib/ingest";
-import { LinkedinClient, normalizeLinkedinUrl, peopleFromSearch } from "@/lib/linkedin";
+import { LinkedinClient, LinkedinError, normalizeLinkedinUrl, parseLinkedinTime, peopleFromSearch, repliesFromInbox } from "@/lib/linkedin";
 import { apolloFindPeople, apolloRevealEmail } from "@/lib/sources/apollo";
 import { domainAcceptsMail, guessEmail } from "@/lib/sources/email-guess";
 import { checkOrgForMacCi } from "@/lib/sources/github";
@@ -149,15 +149,28 @@ export async function findPeopleForCompany(companyId: string) {
       notes.push(error instanceof Error ? error.message : "Apollo search failed.");
     }
   }
-  if (found.length < 2) {
+  const pendingSearch = typeof company.metadata.linkedinSearchRun === "string" ? company.metadata.linkedinSearchRun : null;
+  if (found.length < 2 || pendingSearch) {
     const linkedin = await LinkedinClient.load();
     if (linkedin) {
       try {
-        const workflowId = await linkedin.startSearchPeople({ company: company.name, limit: 15 });
-        const state = await linkedin.waitFor(workflowId, 45_000);
+        // A search takes a minute or two in the browser. If it isn't done in
+        // time, its run id waits on the company for the next "Find people".
+        const workflowId = pendingSearch ?? (await linkedin.startSearchPeople({ company: company.name, limit: 15 }));
+        const state = await linkedin.waitFor(workflowId, 100_000);
+        const stillRunning = state.status === "pending" || state.status === "running";
+        await database
+          .update(companies)
+          .set({
+            metadata: stillRunning
+              ? { ...company.metadata, linkedinSearchRun: workflowId }
+              : Object.fromEntries(Object.entries(company.metadata).filter(([key]) => key !== "linkedinSearchRun")),
+            updatedAt: new Date(),
+          })
+          .where(eq(companies.id, company.id));
         if (state.status === "completed") found.push(...peopleFromSearch(state.data));
         else if (state.status === "failed") notes.push(`LinkedIn search: ${state.message}`);
-        else notes.push("LinkedIn search is still running (it queues behind other LinkedIn actions). Try again in a minute.");
+        else notes.push("LinkedIn search is still running in the browser. Click Find people again in a minute to collect it.");
       } catch (error) {
         notes.push(error instanceof Error ? error.message : "LinkedIn search failed.");
       }
@@ -585,10 +598,12 @@ export async function sendMessage(
         ? await client.startConnectionRequest(person.linkedinUrl, message.body.slice(0, settings.inviteNoteLimit))
         : await client.startMessage(person.linkedinUrl, message.body);
     await database.update(messages).set({ externalId: workflowId }).where(eq(messages.id, message.id));
-    return await resolveLinkedinSend({ ...message, externalId: workflowId }, client, 30_000);
+    // Browser runs take ~30s–2min; most finish inside this wait.
+    return await resolveLinkedinSend({ ...message, externalId: workflowId }, client, 75_000);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Send failed.";
     if (message.channel === "email") await recordConnectionError("gmail", detail);
+    else if (error instanceof LinkedinError && (error.status === 401 || error.status === 402)) await recordConnectionError("linkedin", detail);
     return fail(detail);
   }
 }
@@ -636,8 +651,9 @@ async function markSent(
   if (campaign && message.step !== null) await advance(person, campaign, message.step, sentAt);
 }
 
-// LinkedIn errors that mean "the goal of this step is already met".
-const LINKEDIN_ALREADY = ["alreadyConnected", "alreadyPending", "invitationAlreadyReceived"];
+// LinkedIn outcomes that mean "this step is moot": its goal is already met, or
+// (for a message) they haven't accepted the invite, so the step is passed over.
+const LINKEDIN_ALREADY = ["alreadyConnected", "alreadyPending", "notConnected"];
 
 async function resolveLinkedinSend(message: Message, client: LinkedinClient, budgetMs: number): Promise<SendOutcome> {
   const database = getDatabase();
@@ -652,7 +668,7 @@ async function resolveLinkedinSend(message: Message, client: LinkedinClient, bud
     : [];
   if (!person) return { status: "failed", detail: "Person no longer exists." };
   if (state.status === "completed") {
-    await markSent(message, person, campaign, {});
+    await markSent(message, person, campaign, state.detail ? { metadata: { note: state.detail } } : {});
     return { status: "sent" };
   }
   if (LINKEDIN_ALREADY.includes(state.code)) {
@@ -662,6 +678,9 @@ async function resolveLinkedinSend(message: Message, client: LinkedinClient, bud
       .where(eq(messages.id, message.id));
     if (campaign && message.step !== null) await advance(person, campaign, message.step, new Date());
     return { status: "skipped", detail: state.message };
+  }
+  if (state.code === "loggedOut" || state.code === "http401" || state.code === "http402") {
+    await recordConnectionError("linkedin", state.message);
   }
   await database
     .update(messages)
@@ -730,32 +749,65 @@ async function checkReplies(candidates: Person[]): Promise<number> {
   return replied;
 }
 
+// Reading the LinkedIn inbox is a browser run that takes a minute or two, so
+// one refresh starts it and a later one (the hourly cron, or the next "Check
+// replies") collects it. At most one run every few hours, and only while
+// someone we reached on LinkedIn is still in a sequence.
+const INBOX_EVERY_MS = 4 * 60 * 60 * 1000;
+
 async function checkLinkedinReplies(): Promise<number> {
   const client = await LinkedinClient.load();
   if (!client) return 0;
+  const database = getDatabase();
   const state = await loadRuntimeState();
-  const since = state.linkedinInboxCheckedAt ? new Date(state.linkedinInboxCheckedAt) : new Date(Date.now() - 14 * DAY);
-  const startedAt = new Date();
-  const inbox = await client.inboxSince(since);
-  const theirs = inbox.filter((m) => m.sender === "them");
-  let replied = 0;
-  if (theirs.length) {
-    const active = await getDatabase()
-      .select()
+  const now = new Date();
+
+  if (!state.linkedinInboxRun) {
+    const due = !state.linkedinInboxCheckedAt || now.getTime() - Date.parse(state.linkedinInboxCheckedAt) > INBOX_EVERY_MS;
+    if (!due) return 0;
+    const [anyone] = await database
+      .select({ id: people.id })
       .from(people)
-      .where(and(eq(people.stage, "active"), isNotNull(people.linkedinUrl)));
-    const byUrl = new Map(active.map((p) => [normalizeLinkedinUrl(p.linkedinUrl!), p]));
-    for (const message of theirs) {
-      const person = byUrl.get(normalizeLinkedinUrl(message.personUrl));
-      if (!person) continue;
-      byUrl.delete(normalizeLinkedinUrl(message.personUrl));
-      await markReplied(person, { at: new Date(message.time), body: message.text, channel: "linkedin_message" });
-      replied += 1;
-    }
+      .innerJoin(messages, eq(messages.personId, people.id))
+      .where(and(eq(people.stage, "active"), inArray(messages.channel, LINKEDIN_CHANNELS), eq(messages.status, "sent")))
+      .limit(1);
+    if (!anyone) return 0;
+    await saveRuntimeState({ linkedinInboxRun: await client.startInboxCheck(), linkedinInboxCheckedAt: now.toISOString() });
+    return 0;
   }
-  await saveRuntimeState({ linkedinInboxCheckedAt: startedAt.toISOString() });
+
+  const run = await client.workflow(state.linkedinInboxRun);
+  if (run.status === "pending" || run.status === "running") return 0;
+  await saveRuntimeState({ linkedinInboxRun: null });
+  if (run.status === "failed") {
+    if (run.code === "loggedOut") await recordConnectionError("linkedin", run.message);
+    throw new Error(run.message);
+  }
+
+  const contacted = await database
+    .select({ person: people, firstSentAt: sql<string>`min(${messages.sentAt})` })
+    .from(people)
+    .innerJoin(messages, eq(messages.personId, people.id))
+    .where(and(eq(people.stage, "active"), inArray(messages.channel, LINKEDIN_CHANNELS), eq(messages.status, "sent")))
+    .groupBy(people.id);
+  // The inbox list shows names, not profile URLs.
+  const byName = new Map(contacted.map((row) => [nameKey(row.person.name), row]));
+  let replied = 0;
+  for (const reply of repliesFromInbox(run.data)) {
+    const match = byName.get(nameKey(reply.name));
+    if (!match) continue;
+    byName.delete(nameKey(reply.name));
+    // An older thread where they spoke last isn't a reply to us. When the time
+    // can't be read, stop anyway: a missed reply is worse than a paused sequence.
+    const at = parseLinkedinTime(reply.when, now);
+    if (at && match.firstSentAt && at.getTime() < Date.parse(match.firstSentAt) - DAY) continue;
+    await markReplied(match.person, { at: at ?? now, body: reply.preview, channel: "linkedin_message" });
+    replied += 1;
+  }
   return replied;
 }
+
+const nameKey = (name: string) => name.toLowerCase().normalize("NFKD").replace(/[^a-z]/g, "");
 
 // Daily cron + the owner's Refresh button: confirm queued LinkedIn sends,
 // detect replies and bounces, then draft whatever follow-ups came due.
