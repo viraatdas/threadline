@@ -232,31 +232,43 @@ export async function revealEmail(personId: string) {
   if (!row) throw new Error("Person not found.");
   const apiKey = await loadApiKey("apollo");
   if (!apiKey) throw new Error("Add an Apollo API key in Settings to look up verified emails.");
-  const email = await apolloRevealEmail({
+  const { person, domain } = row;
+  let apolloId = typeof person.metadata.apolloId === "string" ? person.metadata.apolloId : undefined;
+  // Someone on file by first name only (an Apollo search result from before ids
+  // were kept): find their id at the company, since a name lookup can't match.
+  if (!apolloId && domain && !/\s/.test(person.name.trim())) {
+    const candidates = await apolloFindPeople({ apiKey, domain, limit: 25 });
+    const same = candidates.filter((found) => found.name.toLowerCase() === person.name.trim().toLowerCase());
+    apolloId = (same.find((found) => found.title === person.title) ?? (same.length === 1 ? same[0] : undefined))?.apolloId;
+  }
+  const found = await apolloRevealEmail({
     apiKey,
-    name: row.person.name,
-    ...(row.domain ? { domain: row.domain } : {}),
-    ...(row.person.linkedinUrl ? { linkedinUrl: row.person.linkedinUrl } : {}),
+    name: person.name,
+    apolloId,
+    ...(domain ? { domain } : {}),
+    ...(person.linkedinUrl ? { linkedinUrl: person.linkedinUrl } : {}),
   });
-  // Remembered either way, so the hourly fill doesn't pay to ask twice.
-  const checked = sql`${people.metadata} || ${JSON.stringify({ apolloCheckedAt: new Date().toISOString() })}::jsonb`;
-  if (!email) {
-    await database.update(people).set({ metadata: checked }).where(eq(people.id, personId));
-    return null;
-  }
-  // Someone else on file already has it: the same person twice. Leave both as they are.
-  const [taken] = await database
-    .select({ id: people.id })
-    .from(people)
-    .where(and(eq(people.email, email.toLowerCase()), ne(people.id, personId)))
-    .limit(1);
-  if (taken) {
-    await database.update(people).set({ metadata: checked }).where(eq(people.id, personId));
-    return null;
-  }
+  // Another record already holding the address or profile is the same person
+  // twice; leave it there rather than collide.
+  const free = async (column: typeof people.email | typeof people.linkedinUrl, value: string | undefined) => {
+    if (!value) return false;
+    const [taken] = await database.select({ id: people.id }).from(people).where(and(eq(column, value), ne(people.id, personId))).limit(1);
+    return !taken;
+  };
+  const email = found?.email && (await free(people.email, found.email)) ? found.email : null;
+  const linkedinUrl = !person.linkedinUrl && found?.linkedinUrl && (await free(people.linkedinUrl, found.linkedinUrl)) ? found.linkedinUrl : null;
+  // Apollo's search hid the last name; the lookup has it.
+  const fullName = found?.name && !/\s/.test(person.name.trim()) && found.name.toLowerCase().startsWith(person.name.trim().toLowerCase()) ? found.name : null;
   await database
     .update(people)
-    .set({ email: email.toLowerCase(), emailStatus: "found", metadata: checked, updatedAt: new Date() })
+    .set({
+      // Remembered either way, so the hourly fill doesn't pay to ask twice.
+      metadata: sql`${people.metadata} || ${JSON.stringify({ apolloCheckedAt: new Date().toISOString(), ...(apolloId ? { apolloId } : {}) })}::jsonb`,
+      ...(email ? { email, emailStatus: "found" as const } : {}),
+      ...(linkedinUrl ? { linkedinUrl } : {}),
+      ...(fullName ? { name: fullName } : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(people.id, personId));
   return email;
 }
@@ -1089,6 +1101,7 @@ export async function fillPipeline(deadline: number) {
           gte(companies.score, FIT_FOR_PEOPLE),
           or(isNull(people.emailStatus), eq(people.emailStatus, "guessed")),
           sql`${people.metadata}->>'apolloCheckedAt' is null`,
+          sql`coalesce(${people.metadata}->>'apolloHasEmail', 'true') <> 'false'`,
           // Held back as already in touch: not a cold prospect, no lookup needed.
           sql`(${people.metadata}->'inTouch' is null or ${people.metadata}->>'inTouchOverride' = 'true')`,
         ),

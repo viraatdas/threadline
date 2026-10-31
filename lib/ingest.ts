@@ -182,9 +182,15 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
   if (email) identities.push(eq(people.email, email));
   if (found.linkedinUrl) identities.push(eq(people.linkedinUrl, found.linkedinUrl));
   if (found.twitterUrl) identities.push(sql`lower(${people.twitterUrl}) = lower(${found.twitterUrl})`);
+  if (found.apolloId) identities.push(sql`${people.metadata}->>'apolloId' = ${found.apolloId}`);
   if (companyId) {
     identities.push(and(eq(people.companyId, companyId), sql`lower(${people.name}) = lower(${found.name})`)!);
   }
+  const extra = {
+    ...(found.xUserId ? { xUserId: found.xUserId } : {}),
+    ...(found.apolloId ? { apolloId: found.apolloId } : {}),
+    ...(found.apolloHasEmail !== undefined ? { apolloHasEmail: found.apolloHasEmail } : {}),
+  };
   const matches = identities.length
     ? await database.select().from(people).where(or(...identities)).limit(3)
     : [];
@@ -200,7 +206,7 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
       twitterUrl: found.twitterUrl ?? null,
       location: found.location ?? null,
       source,
-      ...(found.xUserId ? { metadata: { xUserId: found.xUserId } } : {}),
+      ...(Object.keys(extra).length ? { metadata: extra } : {}),
     });
     return true;
   }
@@ -223,7 +229,8 @@ export async function upsertPerson(companyId: string | null, found: FoundPerson,
       linkedinUrl: existing.linkedinUrl ?? (linkedinFree ? found.linkedinUrl : null) ?? null,
       twitterUrl: existing.twitterUrl ?? found.twitterUrl ?? null,
       location: existing.location ?? found.location ?? null,
-      ...(found.xUserId && !existing.metadata.xUserId ? { metadata: { ...existing.metadata, xUserId: found.xUserId } } : {}),
+      // Fills ids it didn't have; never replaces ones it did.
+      ...(Object.keys(extra).some((key) => !(key in existing.metadata)) ? { metadata: { ...extra, ...existing.metadata } } : {}),
       updatedAt: new Date(),
     })
     .where(eq(people.id, existing.id));

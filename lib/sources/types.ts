@@ -36,6 +36,10 @@ export interface FoundPerson {
   twitterUrl?: string | undefined;
   // Numeric X account id; lets Today open a DM to them prefilled.
   xUserId?: string | undefined;
+  // Apollo's person id. Its search hides last names and emails; a lookup by id
+  // returns both. hasEmail is Apollo saying whether a lookup would find one.
+  apolloId?: string | undefined;
+  apolloHasEmail?: boolean | undefined;
   location?: string | undefined;
 }
 

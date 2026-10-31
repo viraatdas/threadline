@@ -11,7 +11,8 @@ describe("apollo", () => {
       return json({
         people: [
           { name: "Ada Lovelace", title: "CTO", linkedin_url: "http://www.linkedin.com/in/ada" },
-          { first_name: "Bob", last_name: "Builder", title: "Head of Mobile" },
+          // What api_search really returns: first name, hidden last name, an id.
+          { id: "5f1b2c3d4e5f60718293a4b5", first_name: "Bob", last_name_obfuscated: "Bu***r", title: "Head of Mobile", has_email: true },
           { title: "nameless" },
         ],
       });
@@ -19,7 +20,7 @@ describe("apollo", () => {
     const people = await apolloFindPeople({ apiKey: "key-123", domain: "https://www.acme.io", limit: 2, fetch });
     expect(people).toEqual([
       { name: "Ada Lovelace", title: "CTO", linkedinUrl: "http://www.linkedin.com/in/ada" },
-      { name: "Bob Builder", title: "Head of Mobile" },
+      { name: "Bob", title: "Head of Mobile", apolloId: "5f1b2c3d4e5f60718293a4b5", apolloHasEmail: true },
     ]);
   });
 
@@ -32,9 +33,23 @@ describe("apollo", () => {
 
   it("reveals only real, available emails", async () => {
     const respond = (person: unknown) => fakeFetch(() => json({ person }));
-    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", domain: "acme.io", fetch: respond({ email: "ada@acme.io", email_status: "verified" }) })).resolves.toBe("ada@acme.io");
-    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", fetch: respond({ email: "ada@acme.io", email_status: "unavailable" }) })).resolves.toBeUndefined();
-    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", fetch: respond({ email: "email_not_unlocked@domain.com" }) })).resolves.toBeUndefined();
+    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", domain: "acme.io", fetch: respond({ email: "ada@acme.io", email_status: "verified" }) })).resolves.toEqual({ email: "ada@acme.io" });
+    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", fetch: respond({ email: "ada@acme.io", email_status: "unavailable" }) })).resolves.toEqual({});
+    await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", fetch: respond({ email: "email_not_unlocked@domain.com" }) })).resolves.toEqual({});
     await expect(apolloRevealEmail({ apiKey: "k", name: "Ada", fetch: respond(null) })).resolves.toBeUndefined();
+  });
+
+  it("looks up by Apollo id when it has one, and returns the full name", async () => {
+    const fetch = fakeFetch((_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ id: "5f1b2c3d4e5f60718293a4b5", reveal_personal_emails: false });
+      return json({
+        person: { first_name: "Bob", last_name: "Builder", email: "bob@acme.io", email_status: "verified", linkedin_url: "https://www.linkedin.com/in/bob" },
+      });
+    });
+    await expect(apolloRevealEmail({ apiKey: "k", name: "Bob", apolloId: "5f1b2c3d4e5f60718293a4b5", domain: "acme.io", fetch })).resolves.toEqual({
+      email: "bob@acme.io",
+      name: "Bob Builder",
+      linkedinUrl: "https://www.linkedin.com/in/bob",
+    });
   });
 });

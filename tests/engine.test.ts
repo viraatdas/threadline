@@ -25,7 +25,7 @@ const harness = vi.hoisted(() => ({
   // What the YC directory and Apollo return to the hourly fill.
   ycFound: { source: "yc", warnings: [], companies: [] } as Record<string, unknown>,
   ycSearches: 0,
-  apolloPeople: [] as { name: string; title: string }[],
+  apolloPeople: [] as { name: string; title: string; apolloId?: string; apolloHasEmail?: boolean }[],
   apolloLookups: 0,
 }));
 
@@ -75,9 +75,11 @@ vi.mock("@/lib/sources/yc", async (importOriginal) => ({
 
 vi.mock("@/lib/sources/apollo", () => ({
   apolloFindPeople: async () => harness.apolloPeople,
-  apolloRevealEmail: async (input: { name: string; domain?: string }) => {
+  // Like the real search: first names only, with an id a lookup can use.
+  apolloRevealEmail: async (input: { name: string; apolloId?: string; domain?: string }) => {
     harness.apolloLookups += 1;
-    return `${input.name.split(" ")[0]!.toLowerCase()}@${input.domain}`;
+    if (!input.apolloId) return {};
+    return { email: `${input.name.split(" ")[0]!.toLowerCase()}@${input.domain}`, name: `${input.name} Fullname` };
   },
 }));
 
@@ -637,17 +639,26 @@ describe("hourly fill", () => {
       companies: [{ name: "Sourced Co", domain: "sourced.dev", description: "An iOS app", signals: [], people: [] }],
     };
     harness.apolloPeople = [
-      { name: "Cara Cto", title: "CTO" },
-      { name: "Ivan Ios", title: "iOS Engineer" },
+      { name: "Cara", title: "CTO", apolloId: "aaaaaaaaaaaaaaaaaaaaaaa1", apolloHasEmail: true },
+      { name: "Ivan", title: "iOS Engineer", apolloId: "aaaaaaaaaaaaaaaaaaaaaaa2", apolloHasEmail: true },
+      // Apollo says it has no email for Nora: not worth a credit.
+      { name: "Nora", title: "Founder", apolloId: "aaaaaaaaaaaaaaaaaaaaaaa3", apolloHasEmail: false },
     ];
     process.env.APOLLO_API_KEY = "test-key";
     try {
       const first = await engine.fillPipeline(Date.now() + 60_000);
-      expect(first).toEqual({ sourced: 1, researched: 1, peopleFound: 2, emails: 1, problems: [] });
-      expect(await person("Cara Cto")).toMatchObject({ email: "cara@sourced.dev", emailStatus: "found", stage: "new" });
+      expect(first).toEqual({ sourced: 1, researched: 1, peopleFound: 3, emails: 1, problems: [] });
+      // Looked up by id, which also brings the last name the search hid.
+      expect(await person("Cara Fullname")).toMatchObject({ email: "cara@sourced.dev", emailStatus: "found", stage: "new" });
       // Hands-on engineers aren't worth a credit up front.
-      expect((await person("Ivan Ios")).email).toBeNull();
+      expect((await person("Ivan")).email).toBeNull();
+      expect((await person("Nora")).metadata).not.toHaveProperty("apolloCheckedAt");
       expect(harness.apolloLookups).toBe(1);
+
+      // The next search returns Cara by first name again; her id keeps her one person.
+      await db.update(schema.companies).set({ metadata: sql`metadata - 'peopleSearchedAt'` }).where(eq(schema.companies.name, "Sourced Co"));
+      await engine.findPeopleForCompany((await person("Cara Fullname")).companyId!, { linkedin: false });
+      expect(await db.select().from(schema.people).where(sql`name like 'Cara%'`)).toHaveLength(1);
 
       const again = await engine.fillPipeline(Date.now() + 60_000);
       expect(again).toEqual({ sourced: 0, researched: 0, peopleFound: 0, emails: 0, problems: [] });
@@ -655,15 +666,29 @@ describe("hourly fill", () => {
       expect(harness.apolloLookups).toBe(1);
       expect((await loadRuntimeState()).lastFill).toMatchObject({ sourced: 0, researched: 0 });
       // Nobody was enrolled or contacted.
-      expect((await person("Cara Cto")).campaignId).toBeNull();
+      expect((await person("Cara Fullname")).campaignId).toBeNull();
     } finally {
       delete process.env.APOLLO_API_KEY;
     }
   });
 
+  it("finds the Apollo id for someone on file by first name only, then their email and full name", async () => {
+    const companyId = (await person("Cara Fullname")).companyId!;
+    const [zed] = await db.insert(schema.people).values({ companyId, name: "Zed", title: "CTO", source: "find-people" }).returning();
+    harness.apolloPeople = [{ name: "Zed", title: "CTO", apolloId: "aaaaaaaaaaaaaaaaaaaaaaa4", apolloHasEmail: true }];
+    process.env.APOLLO_API_KEY = "test-key";
+    try {
+      expect(await engine.revealEmail(zed!.id)).toBe("zed@sourced.dev");
+    } finally {
+      delete process.env.APOLLO_API_KEY;
+    }
+    const [after] = await db.select().from(schema.people).where(eq(schema.people.id, zed!.id));
+    expect(after).toMatchObject({ name: "Zed Fullname", emailStatus: "found", metadata: { apolloId: "aaaaaaaaaaaaaaaaaaaaaaa4" } });
+  });
+
   it("ranks the CRM with reasons and learns from who replied", async () => {
     const best = await queries.loadPeople({ view: "best" });
-    const cara = best.rows.find((row) => row.name === "Cara Cto")!;
+    const cara = best.rows.find((row) => row.name === "Cara Fullname")!;
     // Rae, a CTO, replied earlier, so deciders already rank a little higher.
     const lift = best.learning.lifts.decider!;
     expect(lift.lift).toBeGreaterThan(1);
@@ -674,7 +699,7 @@ describe("hourly fill", () => {
       "email found",
       `Decision makers reply ${lift.lift.toFixed(1)}× average so far (${lift.replied}/${lift.contacted})`,
     ]);
-    const ivan = best.rows.find((row) => row.name === "Ivan Ios")!;
+    const ivan = best.rows.find((row) => row.name === "Ivan")!;
     expect(best.rows.indexOf(cara)).toBeLessThan(best.rows.indexOf(ivan));
     // Held back people aren't "best next".
     expect(best.rows.some((row) => row.name === "Lée Linked")).toBe(false);
