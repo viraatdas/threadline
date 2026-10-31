@@ -117,7 +117,8 @@ Vitest (+ PGlite) · pnpm 10 · Node 24.
 
 **Ranking** (`lib/rank.ts`): person score = company fit × role weight
 (decider 1, champion .9, hands-on .65, other .25; a research target title
-counts .95) × reach (found 1, guessed .8, LinkedIn only .75, none .3) × the
+counts .95) × reach (found 1, guessed .8, LinkedIn only .75, X only .6,
+none .3) × the
 role's learned reply lift (smoothed toward the average, 0.5–2). Each factor is
 a reason shown on People and campaign pages.
 

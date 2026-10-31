@@ -1,7 +1,7 @@
 import { learnLifts, rankPerson, stakeholderOf } from "@/lib/rank";
 
 const company = { name: "Acme", score: 80, hook: "Runs iOS builds on macos-14 runners", fitSummary: null, targetTitles: ["Head of Mobile"] };
-const base = { title: null, email: null, emailStatus: null, linkedinUrl: null, company, inTouch: false } as const;
+const base = { title: null, email: null, emailStatus: null, linkedinUrl: null, twitterUrl: null, company, inTouch: false } as const;
 
 describe("stakeholderOf", () => {
   it.each([
@@ -44,6 +44,7 @@ describe("rankPerson", () => {
 
   it("discounts the unreachable, the unresearched and the guessed", () => {
     expect(rankPerson({ ...base, title: "CTO" }).score).toBe(24);
+    expect(rankPerson({ ...base, title: "CTO", twitterUrl: "https://x.com/cto" })).toMatchObject({ score: 48, reasons: [expect.any(String), expect.any(String), "X only"] });
     expect(rankPerson({ ...base, title: "CTO", email: "x@acme.dev", emailStatus: "guessed" }).score).toBe(64);
     const unresearched = rankPerson({ ...base, title: "CTO", email: "x@acme.dev", emailStatus: "found", company: { ...company, score: null } });
     expect(unresearched).toMatchObject({ score: 35, reasons: [expect.any(String), "Acme isn't researched yet", "email found"] });

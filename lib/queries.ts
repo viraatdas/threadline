@@ -209,6 +209,7 @@ export async function loadPeople(filters: { view?: string | undefined; q?: strin
     email: person.email,
     emailStatus: person.emailStatus,
     linkedinUrl: person.linkedinUrl,
+    twitterUrl: person.twitterUrl,
     stage: person.stage,
     closedReason: person.closedReason,
     nextStep: person.nextStep,

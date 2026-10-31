@@ -43,6 +43,7 @@ export interface RankInput {
   email: string | null;
   emailStatus: "found" | "guessed" | "bounced" | null;
   linkedinUrl: string | null;
+  twitterUrl: string | null;
   company: { name: string; score: number | null; hook: string | null; fitSummary: string | null; targetTitles: string[] } | null;
   inTouch: boolean;
 }
@@ -77,7 +78,8 @@ export function rankPerson(input: RankInput, lifts: Lifts = {}): Rank {
   }
 
   const usableEmail = input.email && input.emailStatus !== "bounced";
-  const reach = usableEmail ? (input.emailStatus === "guessed" ? 0.8 : 1) : input.linkedinUrl ? 0.75 : 0.3;
+  // An X DM is opened prefilled and sent by hand; it reaches people who posted the pain themselves.
+  const reach = usableEmail ? (input.emailStatus === "guessed" ? 0.8 : 1) : input.linkedinUrl ? 0.75 : input.twitterUrl ? 0.6 : 0.3;
   reasons.push(
     usableEmail
       ? input.emailStatus === "guessed"
@@ -85,7 +87,9 @@ export function rankPerson(input: RankInput, lifts: Lifts = {}): Rank {
         : "email found"
       : input.linkedinUrl
         ? "LinkedIn only"
-        : input.emailStatus === "bounced"
+        : input.twitterUrl
+          ? "X only"
+          : input.emailStatus === "bounced"
           ? "email bounced, no other way to reach"
           : "no way to reach yet",
   );
@@ -100,7 +104,7 @@ export function rankPerson(input: RankInput, lifts: Lifts = {}): Rank {
 }
 
 export function rankInputFor(
-  person: Pick<Person, "title" | "email" | "emailStatus" | "linkedinUrl" | "metadata">,
+  person: Pick<Person, "title" | "email" | "emailStatus" | "linkedinUrl" | "twitterUrl" | "metadata">,
   company: Pick<Company, "name" | "score" | "hook" | "fitSummary" | "metadata"> | null,
 ): RankInput {
   const titles = company?.metadata.targetTitles;
@@ -109,6 +113,7 @@ export function rankInputFor(
     email: person.email,
     emailStatus: person.emailStatus,
     linkedinUrl: person.linkedinUrl,
+    twitterUrl: person.twitterUrl,
     company: company
       ? {
           name: company.name,

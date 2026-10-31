@@ -1,6 +1,6 @@
 "use client";
 
-import { Mail, UserRound } from "lucide-react";
+import { AtSign, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -260,7 +260,13 @@ export function PeopleTable({
                       LinkedIn
                     </a>
                   ) : null}
-                  {!row.email && !row.linkedinUrl ? <span className="text-ink-faint">—</span> : null}
+                  {row.twitterUrl ? (
+                    <a href={row.twitterUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-ink">
+                      <AtSign className="size-3" aria-hidden="true" />
+                      X
+                    </a>
+                  ) : null}
+                  {!row.email && !row.linkedinUrl && !row.twitterUrl ? <span className="text-ink-faint">—</span> : null}
                 </td>
                 <td className="py-3 pr-4 text-[12px] text-ink-muted">
                   <PersonStatus row={row} />
