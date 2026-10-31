@@ -21,7 +21,9 @@ const TECH = /engineer|engineering|developer|\bdev\b|ios|macos|mobile|swift|plat
 
 export function stakeholderOf(title: string | null | undefined): Stakeholder {
   if (!title?.trim()) return "unknown";
-  if (/founder|\bceo\b|\bcto\b|chief (technology|technical|executive|product) officer|\bpresident\b/i.test(title)) return "decider";
+  if (/founder|\bceo\b|\bcto\b|\bpresident\b/i.test(title)) return "decider";
+  // Chiefs and VPs decide when their remit covers engineering (not sales or marketing).
+  if (/\bchief\b/i.test(title) && (TECH.test(title) || /executive|operating|product/i.test(title))) return "decider";
   if (/\bvp\b|vice president/i.test(title) && TECH.test(title)) return "decider";
   if (/head|director|lead|manager|principal|staff|architect/i.test(title) && TECH.test(title)) return "champion";
   if (TECH.test(title)) return "user";
