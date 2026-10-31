@@ -35,10 +35,13 @@ from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 
-logging.getLogger("browser_use").setLevel(logging.CRITICAL)
-logging.getLogger("bubus").setLevel(logging.CRITICAL)
+# Agent, CDP and event-bus logs carry page text and model output; only our own
+# id/status lines go out at INFO.
+for _name in ("browser_use", "bubus", "cdp_use"):
+    logging.getLogger(_name).setLevel(logging.CRITICAL)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("worker")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log.setLevel(logging.INFO)
 
 DATA = Path(os.environ.get("DATA_DIR", "/data"))
 PROFILE = DATA / "profile"
