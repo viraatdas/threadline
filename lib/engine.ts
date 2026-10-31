@@ -862,11 +862,15 @@ async function checkLinkedinReplies(waitMs: number): Promise<number> {
   const run = waitMs ? await client.waitFor(runId, waitMs) : await client.workflow(runId);
   if (run.status === "pending" || run.status === "running") return 0;
   const conversations = run.status === "completed" ? conversationsFromInbox(run.data) : [];
+  // Each read adds to the list rather than replacing it: a read only sees the
+  // most recent conversations, and anyone the owner has talked to still counts.
+  // An empty read (the page didn't load) changes nothing.
+  const fresh = new Set(conversations.map((conversation) => nameKey(conversation.name)));
+  const known = (state.linkedinConversations ?? []).filter((conversation) => !fresh.has(nameKey(conversation.name)));
   await saveRuntimeState({
     linkedinInboxRun: null,
-    // An empty read (the page didn't load) mustn't wipe the last good list.
     ...(conversations.length
-      ? { linkedinConversations: conversations.slice(0, 100), linkedinConversationsAt: new Date().toISOString() }
+      ? { linkedinConversations: [...conversations, ...known].slice(0, 500), linkedinConversationsAt: new Date().toISOString() }
       : {}),
   });
   if (run.status === "failed") {

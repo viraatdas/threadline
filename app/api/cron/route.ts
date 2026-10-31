@@ -5,8 +5,9 @@ import { refresh } from "@/lib/engine";
 
 export const maxDuration = 300;
 
-// Daily (vercel.json): confirm queued LinkedIn sends, detect replies/bounces,
-// and draft follow-ups that came due. Never sends anything by itself.
+// Hourly (Fly scheduled machine threadline-hourly-sync) and daily (vercel.json):
+// confirm queued LinkedIn sends, detect replies/bounces, read the LinkedIn
+// inbox when due, and draft follow-ups that came due. Never sends anything.
 export async function GET(request: Request) {
   if (!hasBearer(request, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

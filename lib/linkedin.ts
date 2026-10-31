@@ -225,18 +225,22 @@ export class LinkedinClient {
       [
         RULES,
         "",
-        "Task (read-only): open https://www.linkedin.com/messaging/ and read the conversation list.",
-        "Do not open any conversation (that would mark it read). Do not reply, archive, or change anything.",
-        "Scroll the conversation list to load more until you have the 40 most recent conversations or reach the end of the list.",
+        "Task (read-only): LinkedIn Messaging is already open, and its conversation list (the column on the left) has been scrolled to load up to 40 conversations.",
+        "Do not navigate, reload, or open any conversation (that would mark it read). Do not reply, archive, or change anything.",
+        "Read every conversation in that list, top to bottom, including ones below the visible area: use extract on the whole list rather than only what is on screen.",
         "For each, return the other person's name, whether the latest message is from them (not from the owner), the preview text shown, and the time shown.",
       ].join("\n"),
       inboxOutputSchema,
       30,
+      "linkedin_messaging",
     );
   }
 
-  private async start(task: string, outputSchema: Record<string, unknown>, maxSteps: number): Promise<string> {
-    const result = z.object({ id: z.string().uuid() }).parse(await this.call("/runs", "POST", { task, outputSchema, maxSteps }));
+  // prepare names a fixed worker recipe that opens and scrolls a page before
+  // the agent starts (browser/worker.py PREPARE).
+  private async start(task: string, outputSchema: Record<string, unknown>, maxSteps: number, prepare?: "linkedin_messaging"): Promise<string> {
+    const body = { task, outputSchema, maxSteps, ...(prepare ? { prepare } : {}) };
+    const result = z.object({ id: z.string().uuid() }).parse(await this.call("/runs", "POST", body));
     return result.id;
   }
 

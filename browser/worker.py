@@ -173,6 +173,101 @@ def new_session(allowed_domains: list[str] = ALLOWED_DOMAINS) -> BrowserSession:
     )
 
 
+# Some lists only load more as they're scrolled, which the agent skips (it read
+# 10, then 13, LinkedIn conversations however the task was worded, since it only
+# sees about a screenful). A run may name one of these fixed recipes: the worker
+# opens the page, scrolls the list, and reads the rows itself. If the read
+# doesn't look right (LinkedIn changed its markup), the agent reads the
+# scrolled page instead. Callers pick a recipe by name; they can't supply script.
+SCROLL_MESSAGING_JS = r"""
+(async () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const scrollable = (el) => el.scrollHeight > el.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(el).overflowY);
+  const findList = () => {
+    const known = document.querySelector(".msg-conversations-container__conversations-list");
+    if (known) return known;
+    const link = document.querySelector('a[href*="/messaging/thread/"]');
+    return link ? link.closest("ul") : null;
+  };
+  let list = null;
+  for (let i = 0; i < 30 && !list; i++) {
+    list = findList();
+    if (!list) await sleep(500);
+  }
+  if (!list) return { loaded: -1, output: null, classes: [] };
+  let box = list;
+  while (box && !scrollable(box)) box = box.parentElement;
+
+  // LinkedIn empties rows that are far from view, so rows are read as the
+  // list scrolls past them, a screen at a time.
+  const text = (root, selector) => (root.querySelector(selector)?.textContent || "").replace(/\s+/g, " ").trim();
+  const rows = new Map();
+  const readVisible = () => {
+    for (const item of list.children) {
+      const name = text(item, ".msg-conversation-listitem__participant-names, .msg-conversation-card__participant-names");
+      if (!name) continue;
+      const when = text(item, ".msg-conversation-listitem__time-stamp, .msg-conversation-card__time-stamp");
+      const preview = text(item, ".msg-conversation-card__message-snippet, .msg-conversation-card__message-snippet-body");
+      const key = `${name}\u0000${when}`;
+      if (!rows.get(key)?.preview) rows.set(key, { name, when, preview });
+    }
+  };
+  const step = Math.max(200, Math.floor((box?.clientHeight || 600) * 0.8));
+  let height = 0;
+  let still = 0;
+  for (let i = 0; box && i < 60 && rows.size < 40 && still < 4; i++) {
+    readVisible();
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 5;
+    if (atBottom) {
+      still = box.scrollHeight === height ? still + 1 : 0;
+      height = box.scrollHeight;
+    }
+    box.scrollTop = atBottom ? box.scrollHeight : box.scrollTop + step;
+    await sleep(atBottom ? 1500 : 600);
+  }
+  readVisible();
+  if (box) box.scrollTop = 0;
+
+  const named = [...rows.values()];
+  const conversations = named
+    .filter((row) => row.preview)
+    .map((row) => ({
+      name: row.name.slice(0, 200),
+      // LinkedIn prefixes the owner's own last message with "You:".
+      lastMessageFromThem: !/^you:/i.test(row.preview),
+      preview: row.preview.replace(/^you:\s*/i, "").slice(0, 2000),
+      when: row.when.slice(0, 60),
+    }));
+  // A missing preview would read as "they wrote last" and look like a reply.
+  const trusted = named.length > 0 && conversations.length >= Math.ceil(named.length * 0.8);
+  // When the read fails, the class names in one row (never its text) show
+  // what LinkedIn's markup changed to.
+  const sample = [...list.children].find((item) => item.querySelector("[class]"));
+  const classes = trusted || !sample ? [] : [...new Set([...sample.querySelectorAll("[class]")].flatMap((el) => [...el.classList]))].slice(0, 120);
+  return { loaded: list.children.length, output: trusted ? { conversations } : null, classes };
+})()
+"""
+PREPARE = {"linkedin_messaging": ("https://www.linkedin.com/messaging/", SCROLL_MESSAGING_JS)}
+
+
+async def prepare_page(session: BrowserSession, url: str, script: str) -> tuple[int, dict[str, Any] | None, list[str]]:
+    await session.start()
+    await session.navigate_to(url)
+    target = await session.get_most_recently_opened_target_id()
+    cdp = await session.get_or_create_cdp_session(target, focus=True)
+    result = await asyncio.wait_for(
+        cdp.cdp_client.send.Runtime.evaluate(
+            params={"expression": script, "awaitPromise": True, "returnByValue": True}, session_id=cdp.session_id
+        ),
+        90,
+    )
+    value = (result.get("result") or {}).get("value") or {}
+    loaded = value.get("loaded")
+    output = value.get("output")
+    classes = [c for c in value.get("classes") or [] if isinstance(c, str)][:120]
+    return (loaded if isinstance(loaded, int) else -1), (output if isinstance(output, dict) else None), classes
+
+
 def llm() -> ChatOpenRouter:
     return ChatOpenRouter(model=MODEL, api_key=os.environ.get("OPENROUTER_API_KEY"), http_referer="https://threadline.viraat.dev")
 
@@ -183,22 +278,33 @@ async def execute(run: dict[str, Any]) -> None:
     session = new_session()
     try:
         output_model = model_from_schema(run["outputSchema"]) if run.get("outputSchema") else None
-        agent = Agent(
-            task=run["task"],
-            llm=llm(),
-            browser_session=session,
-            output_model_schema=output_model,
-            use_judge=False,
-            max_failures=3,
-            step_timeout=120,
-        )
-        history = await asyncio.wait_for(agent.run(max_steps=run["maxSteps"]), timeout=RUN_TIMEOUT_S)
-        structured = history.structured_output
-        if output_model and structured is None:
-            run.update(status="failed", error="Could not produce output matching outputSchema.")
+        recipe = PREPARE.get(run.get("prepare") or "")
+        read = None
+        if recipe:
+            loaded, read, classes = await prepare_page(session, *recipe)
+            run["prepared"] = {"loaded": loaded, "read": read is not None, "classes": classes}
+            log.info("run %s prepared %s (%s items, %s)", run["id"], run["prepare"], loaded, "read" if read else "agent reads")
+        if read is not None:
+            run.update(status="completed", output=read, steps=0)
         else:
-            run.update(status="completed", output=structured.model_dump() if structured else history.final_result())
-        run["steps"] = history.number_of_steps()
+            agent = Agent(
+                task=run["task"],
+                llm=llm(),
+                browser_session=session,
+                output_model_schema=output_model,
+                use_judge=False,
+                max_failures=3,
+                step_timeout=120,
+                # Otherwise a URL in the task is opened first, reloading a prepared page.
+                directly_open_url=not recipe,
+            )
+            history = await asyncio.wait_for(agent.run(max_steps=run["maxSteps"]), timeout=RUN_TIMEOUT_S)
+            structured = history.structured_output
+            if output_model and structured is None:
+                run.update(status="failed", error="Could not produce output matching outputSchema.")
+            else:
+                run.update(status="completed", output=structured.model_dump() if structured else history.final_result())
+            run["steps"] = history.number_of_steps()
     except asyncio.TimeoutError:
         run.update(status="failed", error=f"Timed out after {RUN_TIMEOUT_S}s.")
     except Exception as error:  # the message is ours or the library's, never page text we chose to log
@@ -351,12 +457,16 @@ async def create_run(request: Request) -> JSONResponse:
         return JSONResponse({"error": "task must be a non-empty string"}, status_code=422)
     if schema is not None and not isinstance(schema, dict):
         return JSONResponse({"error": "outputSchema must be an object"}, status_code=422)
+    prepare = body.get("prepare")
+    if prepare is not None and prepare not in PREPARE:
+        return JSONResponse({"error": f"prepare must be one of {sorted(PREPARE)}"}, status_code=422)
     max_steps = body.get("maxSteps") or 25
     run = {
         "id": str(uuid.uuid4()),
         "status": "queued",
         "task": task,
         "outputSchema": schema,
+        "prepare": prepare,
         "maxSteps": max(1, min(int(max_steps), MAX_STEPS)),
         "createdAt": time.time(),
         "output": None,

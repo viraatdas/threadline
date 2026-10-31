@@ -144,6 +144,15 @@ describe("LinkedinClient (browser worker)", () => {
     expect(body.task).toContain(JSON.stringify('Hi "Ada"\nloved the post'));
   });
 
+  it("asks the worker to scroll Messaging itself before the inbox read", async () => {
+    respond({ id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", status: "queued" });
+    await client.startInboxCheck();
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.prepare).toBe("linkedin_messaging");
+    // No URL in the task: the agent would open it and undo the scroll.
+    expect(body.task).not.toMatch(/https?:\/\//);
+  });
+
   it("maps run outcomes to states the engine understands", async () => {
     const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     respond({ id, status: "queued" });

@@ -525,5 +525,19 @@ describe("already in touch", () => {
     const state = await loadRuntimeState();
     expect(state.linkedinInboxRun).toBeNull();
     expect(state.linkedinConversations).toEqual([{ name: "Lee Linked", when: "Oct 20" }]);
+
+    // A later read adds newer conversations in front of the ones it no longer shows.
+    await saveRuntimeState({ linkedinInboxRun: "inbox-run" });
+    harness.inbox = {
+      conversations: [
+        { name: "Nia New", lastMessageFromThem: false, preview: "", when: "9:02 AM" },
+        { name: "Lee Linked", lastMessageFromThem: false, preview: "", when: "Oct 30" },
+      ],
+    };
+    await engine.refresh();
+    expect((await loadRuntimeState()).linkedinConversations).toEqual([
+      { name: "Nia New", when: "9:02 AM" },
+      { name: "Lee Linked", when: "Oct 30" },
+    ]);
   });
 });

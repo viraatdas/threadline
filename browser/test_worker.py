@@ -148,6 +148,9 @@ def test_http_surface(monkeypatch):
         assert "".join(p["text"] for _, p in browser.sent if p["type"] == "char") == "ab\r"
         assert client.post("/login/input", json={"events": [{"type": "key", "key": "F12"}]}, headers=AUTH).status_code == 422
 
+        # Prepare names a fixed recipe; anything else is refused.
+        assert client.post("/runs", json={"task": "x", "prepare": "evil"}, headers=AUTH).status_code == 422
+
         # A run queued while the owner is signing in waits for the view to close.
         created = client.post("/runs", json={"task": "send it", "outputSchema": SEND_SCHEMA, "maxSteps": 500}, headers=AUTH).json()
         assert created["status"] == "queued"
